@@ -1,0 +1,63 @@
+---
+title: "B-337 — Settle or surface unconfirmed ends whose ticket has closed: a closure settles them, and the dashboard can resolve them"
+id: B-337
+project: baton
+status: done
+updated: 2026-11-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+tier: judgement
+description: "A suspended end whose ticket git later closed or dropped is never confirmed (R-BTN-10 covers only done ends; #415's observation lists only live tickets) and cannot be resolved from the dashboard (its ticket page answers No such ticket). Amend R-BTN-10 so a closure settles it, and make the Unconfirmed tab offer confirm and release for a dropped ticket's row. Requires: none."
+topics:
+  - baton
+owns: {}
+prs: [https://github.com/immediately-run/baton/pull/456]
+depends_on: []
+order: 65
+---
+
+**Brief:** the owner, 2026-11-25 (in a Claude Code session on bering), asked for this ticket after confirming B-127's and B-176's parked ends by hand. Which half settles the case, or both, is the owner's call in the spec PR. The supervisor proposed both halves; the owner has not ruled between them.
+
+**Spec:** [BATON_SPEC §9.6](../../spec/BATON_SPEC/09-claims.md#sec-9-6) ([R-BTN-10](../../spec/BATON_SPEC/09-claims.md#sec-9-6): confirmation by observation, and *Claimable again*), [§4.3](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) (the observation's `unconfirmed` list), [§9.6](../../spec/BATON_SPEC/09-claims.md#sec-9-6) *Claimable again* (an administrator confirms or releases from the dashboard, [R-BTN-155](../../spec/BATON_SPEC/11-people.md#sec-11-4)). Run `npm run spec:impact` on [R-BTN-10](../../spec/BATON_SPEC/09-claims.md#sec-9-6) and [S-BTN-18](../../spec/BATON_SPEC/15-verification.md#scenarios) before the code changes.
+
+**Depends on:** none.
+
+### What happened
+
+On 2026-11-25 two tickets, B-127 (claim 106, `suspended:adjudicated`, 2026-11-07) and B-176 (claim 240, `suspended:reviewed`, 2026-11-17), stayed `unconfirmed` in `GET /v1/repositories/baton/tickets?state=unconfirmed` long after git closed both as done and archived them (2026-11-12 and 2026-11-18). See `docs/interventions.mdx`, 2026-11-24 20:00.
+
+- **Nothing could confirm them.** Each parked end named evidence. #415's observation lists only ends whose ticket is live and not in `closed_tickets`, so the sync never attested them. R-BTN-10 says nothing about a suspended end whose ticket closed after it; only a `done` end is confirmed by closure.
+- **The administrator could not resolve them either.** The ticket listing keeps a claim on a dropped ticket as a row of its own (`src/core/tickets.ts`, "A claim on a ticket git has dropped stays"), so the Unconfirmed tab shows them. But Confirm and Release live on the ticket's page (`src/dashboard/screens/tickets/TicketControls.tsx`), and `GET /v1/repositories/{repo}/tickets/{id}` answers `404 … is not on the board` for a closed ticket, so the page says "No such ticket". The owner confirmed both from the browser console with `POST /v1/ui/claims/{id}/confirm`.
+
+### What to build
+
+1. **Spec, then server: a closure settles the ends still waiting on it.** Amend R-BTN-10 so that an unconfirmed suspended end whose ticket git has since closed (any `closed_as`) or dropped is settled by the first accepted snapshot that shows the closure. Whether it is *confirmed* or *released* is the spec PR's question for the owner. Confirmed reads as "the work stood", released as "the position no longer matters"; either way it must stop holding and stop being listed. Implement it in `judge` (`src/core/claims.ts`), log the event the spec names, and keep S-BTN-243's read budget.
+2. **Dashboard: an unconfirmed end is resolvable wherever it is listed.** A row of the Unconfirmed tab whose ticket is not on the board (no title, no position) offers `claim.confirm` and `claim.release` itself, or links to a page that does. It must never be a link to "No such ticket". Read `docs/context/ux.mdx` first.
+
+### Trust
+
+No new authority: `claim.confirm` and `claim.release` stay an administrator's session actions (R-BTN-155), and the settling in item 1 runs only on an accepted snapshot.
+
+### Invariants
+
+- A suspended end of a live ticket is confirmed exactly as today: by its attested evidence, or by any accepted snapshot when it named none.
+- A `done` end is confirmed exactly as today.
+
+### Tests
+
+- A scenario (take a number with `baton tickets next scenario`): a suspension that named a URL, then git closes the ticket as done. The next accepted snapshot settles the end as the spec says, and the ticket leaves `?state=unconfirmed`. The same with the ticket dropped instead of closed.
+- A dashboard test: an Unconfirmed row for a dropped ticket offers both actions, and each calls its route with the claim's id.
+
+### Exit criteria
+
+- R-BTN-10 says what settles a suspended end whose ticket closed, and the code does it.
+- No unconfirmed end on a closed or dropped ticket is listed without a way to resolve it.
+- `npm test` is green.
+
+## Status
+
+_filed 2026-11-25._
+
+_2026-11-27: closed in the 2026-11-27 sweep of tickets Baton held at merged with their files still open: #456 merged and the ticket file was never closed; the PR had no review rounds to archive, https://github.com/immediately-run/baton/pull/456._

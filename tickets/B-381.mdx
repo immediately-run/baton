@@ -1,0 +1,49 @@
+---
+id: B-381
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-381 — Settle the Runners view's history-read budget with the owner, and align S-BTN-243 with the live-only contract
+depends_on: []
+order: 96
+tags: [roadmap-item]
+project: baton
+description: B-270's review left open whether a per-live-runner history budget meets the brief's constant-per-poll bound, and S-BTN-243 still promises the newest report and transcript for every runner.
+repos: [baton]
+---
+
+**Found by:** the review of B-270's PR, round 2 ([`docs/review/B-270-round-2.mdx`](../docs/review/B-270-round-2.mdx)). #390 was merged on 2026-11-24 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §2.3](../spec/BATON_SPEC/02-deployments.md#sec-2-3) ([R-BTN-87](../spec/BATON_SPEC/02-deployments.md#sec-2-3), the envelope), [§14](../spec/BATON_SPEC/14-api.md#sec-14) (the runners reads' live-only `transcript_url` and `last_report`), [§15](../spec/BATON_SPEC/15-verification.md#sec-15) [S-BTN-243](../spec/BATON_SPEC/15-verification.md#scenarios).
+
+**Depends on:** none.
+
+### What is open
+
+1. B-270's Brief (the owner, 2026-11-22) asks that `rows_read` per poll for the Runners view's three history reads be bounded by a constant. The merged code keys them by every live runner id, so the cost is bounded per live runner and grows with the live fleet, which R-BTN-87 does not cap; the PR changed the ticket's Target to say so, but the Brief was not reconciled ([thread](https://github.com/immediately-run/baton/pull/390#discussion_r4668530775)).
+2. S-BTN-243 still says the runners read finds each runner's newest report and transcript, while the merged contract serves both as `null` beyond the live set ([thread](https://github.com/immediately-run/baton/pull/390#discussion_r4668530799)).
+
+### What to build
+
+1. Put to the owner as a one-letter decision in this ticket's PR: **(a)** accept the per-live-runner budget (as built: a constant number of rows per live runner, independent of retained history) and amend B-270's Brief and R-BTN-87's text to say so; **(b)** add a fixed bound on how many live runners get their latest transcript and report served, nulling the rest, with a test above the bound. Build the answer.
+2. Amend S-BTN-243's row so its runners clause says the latest transcript and report are served for live runners only, and run `npm run spec:index`.
+
+### Exit criteria
+
+- The owner's answer is recorded in the PR, and the code, the API text and the ticket say the same budget; under (b), a test seeds more live runners than the bound and asserts the three statements' rows read stay at the bound.
+- S-BTN-243's row matches the live-only contract; `npm run check:spec` green.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the bound, if any, is the instance's own constant, never a request field.
+
+### Invariants
+
+- R-BTN-3: no runner row is deleted; only what is served beyond the bound changes.
+- The roster and the stored transcripts and reports are untouched.
+
+## Status
+
+_filed 2026-11-27._

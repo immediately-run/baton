@@ -1,0 +1,52 @@
+---
+id: B-400
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-400 — Fix pulled-sync gaps left by R3-1263: export round trip, trailing hint window, polling writes, stale docs"
+depends_on: []
+order: 115
+tags: [roadmap-item]
+project: baton
+description: An export with an unblocked trigger and no dispatch target fails to import, a skipped trailing hint still opens a new window, polling can arm the alarm, and the docs still name GITHUB_DISPATCH_TOKEN.
+repos: [baton]
+---
+
+**Found by:** the review of R3-1263's PR, round 3 ([`docs/review/R3-1263-round-3.mdx`](../docs/review/R3-1263-round-3.mdx)). #311 was merged on 2026-11-26 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §3.3](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) ([R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), sync wants, polling and the dispatch window), [BATON_SPEC §4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) ([R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8), export and import), [BATON_SPEC §6.2](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2) ([R-BTN-77](../spec/BATON_SPEC/06-prerequisites-blocks-advice.md#sec-6-2), the unblocked trigger), [BATON_SPEC §2.1](../spec/BATON_SPEC/02-deployments.md#sec-2-1) (the service's alarm repair), [BATON_SPEC §12.7](../spec/BATON_SPEC/12-security.md#sec-12-7) (the GitHub App as dispatch adapter).
+
+**Depends on:** none.
+
+### What is open
+
+1. `Admin.change` can set `dispatch: null` without clearing an existing `unblocked_trigger`, while import (`src/core/ownerState.ts`) requires the trigger to use the repository's own dispatch target. Set a trigger, disable dispatch, freeze, seal and export, and a fresh destination refuses that bundle ([thread](https://github.com/immediately-run/baton/pull/311#discussion_r4692749466)).
+2. `dueTrailing` (`src/core/webhook.ts`) advances both send timestamps for every due repository before the core checks whether a post already answered the want. With an initial send, a coalesced want a second later and a post before the 30-second alarm, no trailing dispatch goes out, yet a fresh webhook just after the alarm waits another full window ([thread](https://github.com/immediately-run/baton/pull/311#discussion_r4692749478)).
+3. `GET /v1/sync/wanted` is specified as "no state change but the nonce", but `fetch` in `src/core/baton.ts` calls `keepAlarm(true)` before the polling guard, which sets the host's alarm when it is missing or overdue ([thread](https://github.com/immediately-run/baton/pull/311#discussion_r4692749482)). R-BTN-94's read-only contract and §2.1's every-request alarm repair disagree; put to the owner as a one-letter decision in this ticket's PR: (a) polling skips the alarm repair, or (b) R-BTN-94 names the alarm repair as the one write a poll may make.
+4. `README.md` and `docs/runbooks/register-baton.mdx` still tell operators to configure `GITHUB_DISPATCH_TOKEN`, which neither host reads since the static-token fallback was removed ([thread](https://github.com/immediately-run/baton/pull/311#discussion_r4692749488)).
+
+### What to build
+
+1. When a repository's dispatch target changes or is removed, clear (or revalidate) its `unblocked_trigger` in the same write; decide how an existing bundle holding the mismatch imports (drop the trigger with a logged note, or refuse with a clear reason), and cover the export and import round trip.
+2. In `dueTrailing`, clear the trailing marker without advancing the send timestamps when no want remains, and test the initial-send, coalesced-want, early-post sequence followed by a fresh webhook.
+3. Carry out the owner's answer to item 3, with a test of a poll on a host whose alarm is missing or overdue.
+4. Document the GitHub App id and key as the dispatch setup, and that dispatch is off without them while schedules and pulls still work.
+
+### Exit criteria
+
+- S-BTN-56 covers items 1 to 3 on both hosts.
+- `npm test`, `npm run typecheck` and `npm run check:wiki` green.
+
+### Trust
+
+No new input: the dispatch target and trigger are validated registry metadata, and no forge credential is stored or exported.
+
+### Invariants
+
+- A want is state; a dispatch is a hint, and nothing depends on a dispatch arriving.
+- A bundle exported by a version of Baton imports into the same version.
+
+## Status
+
+_filed 2026-11-27._

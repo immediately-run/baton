@@ -1,0 +1,23 @@
+---
+title: B-250 review round 1
+description: Findings and disposition for the only review of the Workers view's constant-statement reads, merged with its blocker and nits fixed and its two should-fix findings carried by B-270.
+---
+
+Reviewed [Baton #281](https://github.com/immediately-run/baton/pull/281) at `384070bb`
+([review](https://github.com/immediately-run/baton/pull/281#pullrequestreview-5962077566)). The
+verdict was changes: two blind reviewers found that the new transcript fold breaks a tie
+differently from the per-worker read it replaced, reproduced it with the production DDL under
+`node:sqlite`, and ran the suite green on both hosts (278 files, 2452 tests), typecheck and the
+wiki and spec checks.
+
+A fix leg answered every thread at `31383854`; no review round followed it. The PR was merged on
+2026-11-19 by neumark, after a merge of `main` that renamed the view to `runnersView` (B-68). No
+finding was left open.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the strict `>` fold serves a different `transcript_url` on a same-instant tie](https://github.com/immediately-run/baton/pull/281#discussion_r4618403581) | Fixed in `31383854` (linked before pending, then the least `(repo, path, claim_id)` on a tie, as the old read). |
+| [Should-fix: the transcript walks read every pointer ever recorded on every poll](https://github.com/immediately-run/baton/pull/281#discussion_r4618403599) | Answered: filed as its own ticket (#284, renumbered B-270). The owner chose bounded serving, and B-270's PR #390 has merged on `main`. |
+| [Should-fix: the status-report walk grows with every report ever sent](https://github.com/immediately-run/baton/pull/281#discussion_r4618403611) | Answered: the same ticket, B-270, merged on `main` with #390. |
+| [Nit: the comparison test's only transcript tie cannot tell the tie rules apart](https://github.com/immediately-run/baton/pull/281#discussion_r4618403618) | Fixed in `31383854` (distinct paths at one instant, out of lexical order, beside a pending pointer). |
+| [Nit: `const ten = 7` measures 8 workers, not the criterion's 10](https://github.com/immediately-run/baton/pull/281#discussion_r4618403625) | Fixed in `31383854`. |

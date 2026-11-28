@@ -1,0 +1,48 @@
+---
+id: B-398
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-398 — Promote B-55's built condition cases into §15's tables and the spec index: S-BTN-130, S-BTN-134 and G-BTN-146"
+depends_on: []
+order: 113
+tags: [roadmap-item]
+project: baton
+description: B-55 was merged with its built scenarios and gate only as prose in §15, so the generated index omits them; every review round asked for the table rows and a regenerated index.
+repos: [baton]
+---
+
+**Found by:** the review of B-55's PR, round 4 ([`docs/review/B-55-round-4.mdx`](../docs/review/B-55-round-4.mdx)), raised in every round from round 1. #316 was merged on 2026-11-25 with this finding open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §15](../spec/BATON_SPEC/15-verification.md#sec-15) ([S-BTN-130](../spec/BATON_SPEC/15-verification.md#scenarios), [S-BTN-134](../spec/BATON_SPEC/15-verification.md#scenarios), [G-BTN-146](../spec/BATON_SPEC/15-verification.md#gates)), [§7.1](../spec/BATON_SPEC/07-conditions.md#sec-7-1) ([R-BTN-160](../spec/BATON_SPEC/07-conditions.md#sec-7-1)).
+
+**Depends on:** none.
+
+### What is open
+
+1. B-55's Status says the PR that builds it moves the scenarios and gates it makes pass back into §15 in the same change. The PR documented S-BTN-130, S-BTN-134 and the unbound part of G-BTN-146 only as prose (§15's *Unbound condition cases (B-55)* and *G-BTN-146 (unbound raises)* paragraphs). `scripts/spec-files.mjs` indexes ids from table rows only, so all three are missing from `spec/BATON_SPEC.md`, and `check:spec` passes without noticing ([thread](https://github.com/immediately-run/baton/pull/316#discussion_r4693184237)). The fix legs could not regenerate the shared index.
+
+### What to build
+
+1. Move the built cases into §15's scenario table (S-BTN-130's narrowed-leg refusal, S-BTN-134's `error_types` refusal) and gate table (G-BTN-146's check, report and reserved-type clauses), citing the tests that cover them; keep the handler and suspend-wait clauses in `spec/proposals/scenarios.md`. Remove the prose paragraphs they replace.
+2. Run `npm run spec:index` in the same change.
+3. Consider a `check:spec` rule that fails when a scenario or gate id appears in a section file's prose but in no table row.
+
+### Exit criteria
+
+- `spec/BATON_SPEC.md` lists S-BTN-130, S-BTN-134 and G-BTN-146; `npm run check:spec` green.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: a spec and index change.
+
+### Invariants
+
+- One home per statement: each case is a row in §15 or a line in the proposals, never both.
+- [R-BTN-30](../spec/BATON_SPEC/15-verification.md#sec-15): each listed scenario is tested or pending by name.
+
+## Status
+
+_filed 2026-11-27._

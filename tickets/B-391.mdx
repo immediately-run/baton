@@ -1,0 +1,51 @@
+---
+id: B-391
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-391 — Keep a finished_self_loop end from stranding a claim after a course change, and specify the field in the end's body
+depends_on: []
+order: 106
+tags: [roadmap-item]
+project: baton
+description: B-30's second review found that a sync dropping the self-loop before the end makes core refuse finished_self_loop while the claim stays active, and §9.4 does not name the field.
+repos: [baton]
+---
+
+**Found by:** the review of B-30's PR, round 2 ([`docs/review/B-30-round-2.mdx`](../docs/review/B-30-round-2.mdx)). #347 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §9.3](../spec/BATON_SPEC/09-claims.md#sec-9-3) (suspending), [§9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4) (the end's body, stated once), [§5.7](../spec/BATON_SPEC/05-courses.md#sec-5-7) ([R-BTN-64](../spec/BATON_SPEC/05-courses.md#sec-5-7), a course change under a claim).
+
+**Depends on:** none.
+
+### What is open
+
+The owner lifted B-30's `no_chain_from` on `review` on 2026-11-25, but the `finished_self_loop` end the PR added stays: the runner sends it on every suspension after a closed self-loop (`src/runner/claimRun.ts`, `advanceLeg`), for bounds and locks as well as refusals.
+
+1. If a sync removes the self-loop between the leg's close and the end, core checks `finished_self_loop` against the new graph and answers `invalid-params` (`src/core/claims.ts`); the runner rethrows and drops its slot while Baton still holds the claim active ([thread](https://github.com/immediately-run/baton/pull/347#discussion_r4657713642)).
+2. `finished_self_loop` is a public `/end` field, but §9.4's payload list, "stated here once", does not name it or its requirements (a suspension, `ended_at_sha`, a graph whose running leg has the current station as an outcome) ([thread](https://github.com/immediately-run/baton/pull/347#discussion_r4657713647)).
+
+### What to build
+
+1. Handle the course-change case without stranding the lease: either core settles a `finished_self_loop` end whose graph no longer has the loop as an ordinary suspension (or a `course-changed` release, R-BTN-64), or the runner, on that refusal, ends the claim without the flag. Run `npm run spec:impact` on the rule you change.
+2. Add `finished_self_loop` to §9.4's body list with its requirements, and `npm run spec:index`.
+
+### Exit criteria
+
+- A regression on both hosts: a closed self-loop, a snapshot that drops the loop, then the end; the claim ends (no active claim left behind) and the runner's slot is free.
+- §9.4 names the field; `npm run check:spec` green.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the flag is a runner's report about its own claim, still checked against the graph in force.
+
+### Invariants
+
+- A suspension at `from` without the flag still gives up the run, as before.
+- A claim never stays active after its runner has stopped holding it.
+
+## Status
+
+_filed 2026-11-27._

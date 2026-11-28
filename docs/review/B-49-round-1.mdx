@@ -1,0 +1,23 @@
+---
+title: B-49 review round 1
+description: Findings and disposition for the first review of one evaluation per transaction, all fixed before the next round.
+---
+
+Reviewed [Baton #67](https://github.com/immediately-run/baton/pull/67) at `0728efbf` by two reviewers
+([reviewer A](https://github.com/immediately-run/baton/pull/67#pullrequestreview-5579456370), [reviewer B](https://github.com/immediately-run/baton/pull/67#pullrequestreview-5579484818)).
+No verdict comment was posted; the reviewers found three blocking findings (two of them the same
+gap), two should-fix and three nits, each reproduced in a scratch worktree. Both confirmed the
+probe test and S-BTN-45 fail on `main` and pass on the head.
+
+Every finding was fixed in `6d53994c`, with a reply on each thread, and round two checked them.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the alarm still evaluates twice, because `raiseStalled` writes after the batch](https://github.com/immediately-run/baton/pull/67#discussion_r4320326139) | Fixed in `6d53994c`: `raiseStalled` runs inside the batch, with a test. |
+| [Blocking: the sync post's and alarm's batches have no test that fails without them](https://github.com/immediately-run/baton/pull/67#discussion_r4320327167) | Fixed in `6d53994c`: one test per batched caller, checked by mutation. |
+| [Blocking: the sync post's batch changes behaviour untested and undeclared](https://github.com/immediately-run/baton/pull/67#discussion_r4320349938) | Fixed in `6d53994c` (the same finding as the one above). |
+| [Should-fix: the `lost` predicate is narrower than the R-BTN-77 amendment](https://github.com/immediately-run/baton/pull/67#discussion_r4320326691) | Fixed in `6d53994c` by widening the code; round two found the widening too broad. |
+| [Should-fix: the alarm's batch cannot merge two recounts, and its comment says it does](https://github.com/immediately-run/baton/pull/67#discussion_r4320350358) | Fixed in `6d53994c`: the batch now holds `raiseStalled`; `instancesChanged`'s batch is declared untested. |
+| [Nit: the netting bookkeeping in `rewrite` is unreachable and untested](https://github.com/immediately-run/baton/pull/67#discussion_r4320350644) | Fixed in `6d53994c`: removed. |
+| [Nit: the R-BTN-77 clause says "whatever else", the code only other kinds](https://github.com/immediately-run/baton/pull/67#discussion_r4320350946) | Fixed in `6d53994c` (with the should-fix above). |
+| [Nit: the row-shape literal is spelled four times](https://github.com/immediately-run/baton/pull/67#discussion_r4320351065) | Fixed in `6d53994c`: `interface BlockRow`. |

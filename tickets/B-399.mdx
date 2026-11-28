@@ -1,0 +1,49 @@
+---
+id: B-399
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-399 — A parked end keeps a delivered leg timeout, and trace replay caps legs_finished as the validator does
+depends_on: []
+order: 114
+tags: [roadmap-item]
+project: baton
+description: "Two findings left open when B-60's PR merged: a parked terminal end retried after a leg-timeout refusal can succeed as done, and replay reads past the validator's 32-entry cap."
+repos: [baton]
+---
+
+**Found by:** the review of B-60's PR, round 4 ([`docs/review/B-60-round-4.mdx`](../docs/review/B-60-round-4.mdx)). #307 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §7.5](../spec/BATON_SPEC/07-conditions.md#sec-7-5) ([R-BTN-90](../spec/BATON_SPEC/07-conditions.md#sec-7-5): a `leg-timeout` release is always a failed attempt); [§9.4](../spec/BATON_SPEC/09-claims.md#sec-9-4) (ending a claim); [§15](../spec/BATON_SPEC/15-verification.md#sec-15) ([R-BTN-68](../spec/BATON_SPEC/15-verification.md#sec-15), trace replay).
+
+**Depends on:** none.
+
+### What is open
+
+1. When a terminal `done` end never reaches Baton, the runner parks its body; the sidecar's `retryEnd` (`src/runner/sidecar.ts`) resends it unchanged after a `rule_code: leg-timeout` refusal, then acknowledges the timeout as an unmatched release, and a later retry succeeds as `done` with no timeout hand-off and no failed attempt ([thread](https://github.com/immediately-run/baton/pull/307#discussion_r4693970076)).
+2. Trace replay (`scripts/check-traces.mjs`) searches the whole `legs_finished` array for the finishing run, while the live validator (`src/core/validate.ts`) keeps only the first `MAX_CLAIMS_CAP` (32) entries; a trace with 32 leading nulls replays the same, though live Baton would never see the valid entry ([thread](https://github.com/immediately-run/baton/pull/307#discussion_r4693970089)).
+
+### What to build
+
+1. A parked end that meets a `leg-timeout` refusal is replaced, not resent: the runner writes the hand-off if it has not and the sidecar retries `released:leg-timeout`, so the attempt is recorded as failed. A delivered timeout for a claim with a parked end is never acknowledged as unmatched.
+2. Replay applies the validator's cap before matching the run (share the constant).
+3. Tests: a runner regression that drops the first end request, delivers the timeout and checks the hand-off, `released:leg-timeout` and the failed attempt; a replay regression with 32 leading entries that is rejected.
+
+### Exit criteria
+
+- The two regressions pass; S-BTN-52 passes on both hosts and its traces replay whole.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the end bodies and the heartbeat's `legs_finished` are the runner's existing fields; the change is in how the runner retries and how replay reads them.
+
+### Invariants
+
+- A delivered `leg-timeout` stands: no end but `released:leg-timeout` closes a claim it was delivered to (R-BTN-90).
+- Replay accepts a step only where the live validator would.
+
+## Status
+
+_filed 2026-11-27._

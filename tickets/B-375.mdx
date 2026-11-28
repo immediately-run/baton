@@ -1,0 +1,54 @@
+---
+id: B-375
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-375 — Stop the idle bound concluding a working agent: full store walk, real claude-code key, wrapper log name, full output"
+depends_on: []
+order: 90
+tags: [roadmap-item]
+project: baton
+description: B-108's harness-store signal can read quiet while a claude-code agent works (a 512-entry walk cap and a wrong project key), the example wrapper logs under the wrong name, and a concluded agent's in-flight output is dropped.
+repos: [baton]
+---
+
+**Found by:** the review of B-108's PR, round 1 ([`docs/review/B-108-round-1.mdx`](../docs/review/B-108-round-1.mdx)). #228 was merged on 2026-11-12 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) ([R-BTN-131](../spec/BATON_SPEC/05-courses.md#sec-5-8), an agent's completion is its exit or its silence), [BATON_SPEC §8.3](../spec/BATON_SPEC/08-runners.md#sec-8-3) ([R-BTN-72](../spec/BATON_SPEC/08-runners.md#sec-8-3), the runner's liveness line).
+
+**Depends on:** none.
+
+### What is open
+
+1. `newestWrite` (`src/runner/log.ts`, used by the stub and the runner) walks only the first 512 entries of each directory in `readdirSync` order. claude-code keeps one `.jsonl` per session under its project directory, so a live session file past the cut reads as quiet and the idle bound kills a working agent; reproduced with 600 files ([thread](https://github.com/immediately-run/baton/pull/228#discussion_r4553735347)).
+2. claude-code's project key is not `checkout.split('/').join('-')` (`src/runner/harness.ts`): the binary replaces every non-alphanumeric character with `-` and, past 200 characters, truncates and appends a hash. For a checkout path with `.`, `_` or a space, the watched directory never exists, and a headless `claude -p` agent, silent on stdout, is concluded idle at 15 minutes ([thread](https://github.com/immediately-run/baton/pull/228#discussion_r4553735357)).
+3. The stub watches `.baton/logs/<ticket>-<leg>.log`, but `.baton/leg-wrapper.example` takes the ticket and leg from `$2`/`$3`, which for every multi-word `agent_command` are the agent's own words, so a repository that copied the example never feeds the wrapper-log signal ([thread](https://github.com/immediately-run/baton/pull/228#discussion_r4553735366)).
+4. When a bound concludes the agent, `finishWatch` (`src/defaults/stub-runtime.ts`) kills the child and resolves with the stdout drained so far, dropping bytes already written; at the absolute bound that truncates the tail, where an ask leg's answer line is ([thread](https://github.com/immediately-run/baton/pull/228#discussion_r4553735377)).
+
+### What to build
+
+1. Make the newest-write walk see every top-level entry of a store (stat them all, or sort by mtime before bounding), bounding only the recursion; one copy, shared by the stub and the runner.
+2. Derive claude-code's project key the way the harness does (non-alphanumerics to `-`, the long-path hash), and test it with paths containing `.`, `_`, a space and over 200 characters.
+3. Make the example wrapper read the ticket and leg from the trailing arguments the stub passes, or key the watched log on a path the stub controls, and test with the kit's own multi-word command shape.
+4. On a conclusion, resolve on the killed child's `close` so the received output is complete; test that the last line written before the kill is the answer read.
+
+### Exit criteria
+
+- A test with 600 session files and a live write past index 512 is never concluded idle; a test with a checkout path containing `_` keeps the claude-code store signal live.
+- The example wrapper, run with a multi-word command, writes the log the stub watches.
+- An agent concluded at the ceiling with output in flight yields its full output to the last-line contract.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the stub and runner read file modification times in directories they already watch and never read their contents.
+
+### Invariants
+
+- A working agent is never concluded on idle before the absolute bound (B-108's exit criterion).
+- Baton's server takes no part in concluding a leg.
+
+## Status
+
+_filed 2026-11-27._

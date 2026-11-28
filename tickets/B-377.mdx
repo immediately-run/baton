@@ -1,0 +1,49 @@
+---
+id: B-377
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-377 — A read-only review leg keeps its verified ticket text across a runner restart and merges layered snapshot settings by field
+depends_on: []
+order: 92
+tags: [roadmap-item]
+project: baton
+description: "Two blocking findings left open when B-141's PR merged: a reattach drops the verified ticket text a later reads_only leg needs, and layered OpenCode snapshot settings replace whole agents and providers."
+repos: [baton]
+---
+
+**Found by:** the review of B-141's PR, round 2 ([`docs/review/B-141-round-2.mdx`](../docs/review/B-141-round-2.mdx)). #334 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-183](../spec/BATON_SPEC/12-security.md#sec-12-8): a `reads_only` leg's review input and configuration come from the verified source and the default-branch snapshot).
+
+**Depends on:** none.
+
+### What is open
+
+1. A versioned ticket with a path loses its verified text across a runner restart. An ordinary leg leaves `ticket.file` out of the persisted context, and a reattach skips the source read, so the next `reads_only` leg carries the ticket's version with no verified text and fails in `src/defaults/read-only-workspace.ts` ([thread](https://github.com/immediately-run/baton/pull/334#discussion_r4656383689)).
+2. `readOnlyHarness` (`src/runner/harness.ts`) merges the snapshot's OpenCode files by replacing whole entries: an agent named in both `opencode.json` and `.opencode/opencode.jsonc` keeps only the later file's fields, and providers are spread the same way. A `.opencode/opencode.jsonc` that changes only a reviewer's description drops its model and mode, so the review can run on another model ([thread](https://github.com/immediately-run/baton/pull/334#discussion_r4656383693)).
+
+### What to build
+
+1. Keep the verified ticket text in the runner's resume state for every claim whose course has a `reads_only` leg, without changing what an ordinary leg's context carries, so a reattached claim still hands it to the read-only leg.
+2. Merge supported agent and provider fields field by field across the four snapshot files, in OpenCode's precedence order, before applying the mandatory read-only policy.
+
+### Exit criteria
+
+- A test restarts the runner during an ordinary leg of a path-bearing versioned ticket, reattaches, and the following `reads_only` leg receives the verified text.
+- A test with layered agent and provider entries across `opencode.json` and `.opencode/opencode.jsonc` shows the launch keeps non-conflicting fields (the model and mode survive a description-only override).
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the verified ticket text and the snapshot's configuration are already trusted inputs of the read-only leg; this keeps them intact across a restart and a layered config.
+
+### Invariants
+
+- A `reads_only` leg runs no branch code and loads no branch configuration (R-BTN-183).
+- The mandatory read-only tool policy is applied after the merge and cannot be overridden by any snapshot field.
+
+## Status
+
+_filed 2026-11-27._

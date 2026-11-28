@@ -1064,3 +1064,39 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
     release ticket after ticket (B-336 covers sandbox placement; this is the same shape).
   - A source-check failure is not "ticket moved under the claim"; it should not be released
     `stale-board`. *No ticket yet.*
+
+## 2026-11-27 — 93 tickets Baton held at `merged` whose files still said open; 56 closed by hand, 33 found never delivered
+
+- **Host:** none (a cloud session working from the repository and Baton's reads)
+- **Tickets:** B-314 and B-316 ([#468](https://github.com/immediately-run/baton/pull/468)); 56
+  more ([#469](https://github.com/immediately-run/baton/pull/469)); 33 left open (listed in #469)
+- **Why it was needed:**
+  - **Found while planning 0.1.** The plan ranked eight existing tickets as phase A work from
+    their `available` status. Six had already merged (B-324, B-244 and B-249 on 2026-11-25;
+    B-337, B-347 and B-336 since), and so had B-311 in phase B.
+  - **The scale.** Paging `GET /v1/repositories/baton/tickets` found 93 tickets at
+    `create-pr`'s end station `merged` whose files said `available`, `in-review` or
+    `in-progress`. Each had a `position-disagrees` discrepancy in its history (Baton `merged`,
+    git `available`) that nothing acted on. Only the merge leg closes a ticket's file; these PRs
+    were merged by hand (13 at once on 2026-11-24), by the merge queue, or by another ticket's
+    leg.
+  - **Not all were delivered.** Read against their PRs and `main`, 33 of the 89 swept were never
+    delivered: what merged was a filing PR (B-358's #463), a spec or ruling PR whose build is
+    another ticket's (B-260's #270, B-351's #462, B-146's #335), or a PR that calls itself
+    partial (B-47's #320, B-135's #330, B-336's #464). Baton holds these at `merged` too, so no
+    runner is offered them: open work no runner can see. B-122 (goals) is among them.
+- **Resolution, at the owner's word (decision D8 of the plan, option a):**
+  - #468: B-314 and B-316 closed, their review rounds archived, their open findings filed as
+    B-372 and B-373.
+  - #469: 56 delivered tickets closed the merge leg's way: every review round not yet archived
+    written to `docs/review/`, `dibber done` (R3-1263 by hand: Dibber cannot write a legacy
+    prefix), moved to `tickets/archive/`, and the findings still open at merge filed as B-375 to
+    B-400. Six agents read the PRs in parallel; the session closed, numbered and committed.
+  - B-68 and R3-1268 were left alone: each waits on an open docs PR.
+  - The 33 undelivered tickets stay open and stay at `merged` in Baton: putting them back on
+    the course is an owner act (adopt is not built).
+- **Autonomous handling:**
+  - B-374 (#469): a `close` leg from `merged` so a ticket is closed whatever merged its PR; a
+    `baton.store-behind` condition for an end-station disagreement; no ticket taken as delivered
+    from a filing, spec or partial PR; the 33 put back on the course.
+  - Until B-374 lands, every hand merge is a ticket someone must close by hand.

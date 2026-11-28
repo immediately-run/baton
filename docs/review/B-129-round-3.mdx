@@ -1,0 +1,19 @@
+---
+title: B-129 review round 3
+description: Findings and disposition for the third review of the claim that asks Baton first, closed under the owner's rulings.
+---
+
+Reviewed [Baton #160](https://github.com/immediately-run/baton/pull/160) at `c37220e` ([round comment](https://github.com/immediately-run/baton/pull/160#issuecomment-6605604295)). The
+round posted no verdict marker; one fresh reviewer found five of round two's six closures held
+and raised one blocking finding, which an adjudicator reproduced with a probe, plus two
+should-fix and a nit, so it counts as changes.
+
+The owner decided each; all were closed in `8cb2199`, and the owner asked for one more fresh
+round.
+
+| Finding | Disposition |
+|---|---|
+| Blocking: `courseStart` ignored the repository's `default_course`, so a ticket at a build-app start was claimed as a takeover | Fixed in `8cb2199` (owner: "Fix, one more fresh round"), with a test that fails on the old code. |
+| Should-fix: core reads `display.status`, which R-BTN-33 called opaque | Fixed in `8cb2199` (owner: "Write narrow exceptions"): R-BTN-33 names `display.project` and `display.status`. |
+| Should-fix: `resumeOf` reads resume records' `branches` and `prs`, which R-BTN-50 said core never reads | Fixed in `8cb2199` under the same ruling: R-BTN-50 names the exception. |
+| Nit: R-BTN-85's row defined "past its start" a second way | Fixed in `8cb2199`: it cites R-BTN-74. |

@@ -1,0 +1,21 @@
+---
+title: B-300 review round 1
+description: Findings and disposition for the first review of the dashboard headers and destructive-action confirmations, all fixed before the next round.
+---
+
+Reviewed [Baton #341](https://github.com/immediately-run/baton/pull/341) at `8d3291e7`
+([review](https://github.com/immediately-run/baton/pull/341#pullrequestreview-6011176937), [verdict comment](https://github.com/immediately-run/baton/pull/341#issuecomment-7076373635)). The
+verdict was changes: the reviewer found three blocking defects (a Stop dialog that can confirm
+another ticket, runbooks and a drill that the new contract breaks, and an empty API-key POST
+answered `invalid-params` on the Node listener) and one should-fix in the spec; typecheck and 115
+focused local, Cloudflare and UI tests passed.
+
+Every finding was fixed in `cb728b62`, with a reply on each thread, and round two verified them.
+
+| Finding | Disposition |
+|---|---|
+| The PR body had no Fit section and did not name the separate runner log-masking change (review body) | Fixed: the PR body gained a Fit section and names the masking change (`6af59cbb`). |
+| [Blocking: polling can replace the runner's held ticket while the Stop dialog is open, so it confirms a different ticket](https://github.com/immediately-run/baton/pull/341#discussion_r4657299180) | Fixed in `cb728b62`: runner controls remount when the claim changes, with a UI regression. |
+| [Blocking: the incident runbooks pin clients that omit `confirm`, and the drill omits `--yes`](https://github.com/immediately-run/baton/pull/341#discussion_r4657299186) | Fixed in `cb728b62`: the runbooks require an exact pinned release containing B-300, and the drill passes `--yes`. |
+| [Blocking: an empty API-key POST reaches JSON parsing on the Node listener and answers 400, not 428](https://github.com/immediately-run/baton/pull/341#discussion_r4657299191) | Fixed in `cb728b62`: the listener passes zero bytes as no body, with a regression over the real listener. |
+| [Should-fix: R-BTN-138 still describes manual path changes and their fields as built](https://github.com/immediately-run/baton/pull/341#discussion_r4657299193) | Fixed in `cb728b62`: R-BTN-138 marks them unbuilt (B-45). |

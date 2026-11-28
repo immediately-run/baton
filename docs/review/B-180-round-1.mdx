@@ -1,0 +1,21 @@
+---
+title: B-180 review round 1
+description: Findings and disposition for the first review of the spec bundle and its section links, all fixed before the next round.
+---
+
+Reviewed [Baton #176](https://github.com/immediately-run/baton/pull/176) at `e3b90c49` by two reviewers
+([reviewer B](https://github.com/immediately-run/baton/pull/176#pullrequestreview-5768324315), [reviewer A](https://github.com/immediately-run/baton/pull/176#pullrequestreview-5768523495)).
+No verdict comment was posted; the reviewers found one should-fix and three nits and nothing
+blocking. Each checked every rewritten link's file and anchor against `headingId`, the
+identical id lists, and that the failing tests and `check:tickets` findings were the same on
+the base commit.
+
+Every finding was fixed in `95cd8c51` or in the PR body, with a reply on each thread, and round
+two checked them.
+
+| Finding | Disposition |
+|---|---|
+| [Should-fix: `**Spec:**` lines that cite BATON_SPEC by rule id, not by `§`, stay an unclickable code span](https://github.com/immediately-run/baton/pull/176#discussion_r4467655702) | Fixed in `95cd8c51`: rule, scenario and gate ids after BATON_SPEC link to their section. |
+| [Nit: a run of citations ends at any code span, so B-52's later citations stay plain](https://github.com/immediately-run/baton/pull/176#discussion_r4467520148) | Fixed in `95cd8c51`: only a span naming another spec ends the run. |
+| [Nit: the `SCRIPT_TESTS` JSDoc sits between `NODE_ONLY`'s JSDoc and `NODE_ONLY`](https://github.com/immediately-run/baton/pull/176#discussion_r4467655722) | Fixed in `95cd8c51`. |
+| [Nit: the PR body says the failing tickets are untouched, but R3-1272 is changed](https://github.com/immediately-run/baton/pull/176#discussion_r4467655733) | Fixed in the PR body. |

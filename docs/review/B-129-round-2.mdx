@@ -1,0 +1,20 @@
+---
+title: B-129 review round 2
+description: Findings and disposition for the second review of the claim that asks Baton first, with one owner ruling.
+---
+
+Reviewed [Baton #160](https://github.com/immediately-run/baton/pull/160) at `db7a436` ([round comment](https://github.com/immediately-run/baton/pull/160#issuecomment-6605022455)). The
+round posted no verdict marker; one fresh reviewer found that 11 of round one's 15 closures held
+and raised one blocking finding and five more, so it counts as changes.
+
+All six were closed in `db29657`, `eebe101`, `89cf510`, `e991145`, `13fe997`,
+`b9244de`, `4819b0b` and `c37220e`, and round three checked them.
+
+| Finding | Disposition |
+|---|---|
+| Blocking: round one's fix had core read the posted `course.prs` and store PR lists, which R-BTN-50 and R-BTN-33 forbid | Fixed by head `c37220e` (reverted). Telling a kept-PR release apart went to the owner: "Accept the extra entries" (2026-11-03), recorded in Decisions. |
+| Should-fix: with no local `course.json`, "past its start" fell back to any row that reached a station | Fixed by head `c37220e`: the standard course's start, else undetermined. |
+| Should-fix: a release not past its start, with no `--note`, lacked its subject and `PR` lines | Fixed by head `c37220e`. |
+| Should-fix: the 2026-10-15 Decision still said Baton's state is never a discrepancy | Fixed by head `c37220e`: amended to name the exception. |
+| Should-fix: a fifth copy of the API-key regex | Fixed by head `c37220e`: `cli/sign.mjs` exports one dispatch. |
+| Nit: R-BTN-24 restated the route row | Fixed by head `c37220e`. |

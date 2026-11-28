@@ -1,0 +1,23 @@
+---
+title: B-311 review round 2
+description: Findings and disposition for the second review of outside work reconciled through courses, merged with six blocking findings open.
+---
+
+Reviewed [Baton #348](https://github.com/immediately-run/baton/pull/348) at `7d9d59f6`
+([review](https://github.com/immediately-run/baton/pull/348#pullrequestreview-6011996137)). The
+verdict was changes: the reviewer rechecked round 1's fixes, ran `npm test`, typecheck and
+`test-course` for the checkout and the three fresh scaffolds, and found six blockers, five of them
+narrower cases of round 1's.
+
+The PR was merged on 2026-11-26 with this round's findings open; the commits after this round are
+merges of `main` and their test repairs. No fix leg ran after this round. The open findings are
+carried by B-394.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the reconcile stub's PR mapping lets a fork count by branch alone](https://github.com/immediately-run/baton/pull/348#discussion_r4657908430) (R-BTN-139 needs a same-repository head by immutable id) | Open on `main` (`src/defaults/pr-verify.ts` still matches on number, head and repository, without the sync's `sameRepository`). Carried by B-394. |
+| [Blocking: the stale-push guard drops a fix the later verdict cannot replace](https://github.com/immediately-run/baton/pull/348#discussion_r4657908433) (`create-spec` at `reviewed` emits neither fact) | Open on `main` (`src/defaults/outside-work.ts` still suppresses the push whenever a later verdict exists). Carried by B-394. |
+| [Blocking: a closed PR with an unapplied prior approval stays queued for `review`](https://github.com/immediately-run/baton/pull/348#discussion_r4657908435) | Open on `main` (`stationsReviewPr` in `src/defaults/course-pr.ts` still returns `approved` before it checks for a closed PR). Carried by B-394. |
+| [Blocking: a checkout failure before the reconcile leg starts still exhausts into a ticket-wide hold](https://github.com/immediately-run/baton/pull/348#discussion_r4657908438) | Open on `main` (the retry path in `src/core/claims.ts` still passes only the running leg, not `offered_leg`). Carried by B-394. |
+| [Blocking: an evidence window over 1 MiB stalls the board indefinitely](https://github.com/immediately-run/baton/pull/348#discussion_r4657908440) | Open on `main` (`src/core/board.ts` still refuses attestations over 1 MiB with no way forward). Carried by B-394. |
+| [Blocking: the machine-key case is still an owner decision](https://github.com/immediately-run/baton/pull/348#discussion_r4657908442) | Open: `verifySync` still refuses a runner key before reading the board. Carried by B-394 as a question for the owner. |

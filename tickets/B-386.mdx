@@ -1,0 +1,49 @@
+---
+id: B-386
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-386 — The SQL dialect lint catches fragments held in local constants and the rowid aliases
+depends_on: []
+order: 101
+tags: [roadmap-item]
+project: baton
+description: "Two blocking findings left open when B-278's PR merged: the lint drops an interpolated local-constant fragment and misses _rowid_, oid and a quoted qualified rowid."
+repos: [baton]
+---
+
+**Found by:** the review of B-278's PR, round 2 ([`docs/review/B-278-round-2.mdx`](../docs/review/B-278-round-2.mdx)). #371 was merged on 2026-11-25 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** none (the dialect lint is a test-time gate).
+
+**Depends on:** none.
+
+### What is open
+
+1. The lint drops a statically known SQL fragment held in a local constant: with `const conflict = "OR IGNORE"` and ``INSERT ${conflict} INTO …``, the identifier becomes a space in the scanned template and the standalone fragment has no `INSERT`, so `sourceUses` reports nothing ([thread](https://github.com/immediately-run/baton/pull/371#discussion_r4661199783)).
+2. The `rowid` check compares the identifier to `ROWID` alone, so the legacy qualified spelling `t.'rowid'` and SQLite's aliases `_rowid_` and `oid`, which all read the implicit row id, are not flagged ([thread](https://github.com/immediately-run/baton/pull/371#discussion_r4661199785)).
+
+### What to build
+
+1. In `scripts/lib/sql-dialect.mjs`, resolve an interpolated identifier bound in the same file to a string constant and scan it in context; an interpolation the scanner cannot resolve inside SQL text is reported, never silently dropped.
+2. Treat `_rowid_`, `oid` and a single-quoted qualified `rowid` as `rowid` uses, without flagging a plain string value such as `SELECT 'rowid'`.
+3. Regression cases for each in `scripts/sql-dialect.test.mjs`, positive and negative; any new finding in today's source joins the allowlist as recorded debt.
+
+### Exit criteria
+
+- The two forms above are reported by `sourceUses`, and the negative cases are not.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the lint reads the repository's own source; no SQL is built or run differently.
+
+### Invariants
+
+- The allowlist only shrinks: a newly detected existing use is recorded once, and a PR's new use still fails.
+- No SQL string value is read as a keyword.
+
+## Status
+
+_filed 2026-11-27._

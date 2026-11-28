@@ -1,0 +1,17 @@
+---
+title: B-259 review round 2
+description: Findings and disposition for the second review of archiving events before retention deletes them; its one blocking finding was fixed before merge.
+---
+
+Reviewed [Baton #357](https://github.com/immediately-run/baton/pull/357) at `fc4a033b`
+([review](https://github.com/immediately-run/baton/pull/357#pullrequestreview-6013328757)). The
+review's own words were "one blocking regression remains": the reviewer rechecked round 1's six
+fixes, ran the focused suites and typecheck, and found the overlapping-alarm guard suspending all
+retention. No `baton:verdict` comment was posted for this review; the next verdict comment belongs
+to round 3.
+
+The PR was merged on 2026-11-25. This round's finding was fixed on the branch before merge.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the in-flight guard skips all retention, not only event archival](https://github.com/immediately-run/baton/pull/357#discussion_r4659003368) (snapshot, runner-declaration and closed-claim cleanup wait on a stalled write) | Fixed in `3c52792d`. |

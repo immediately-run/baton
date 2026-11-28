@@ -1,0 +1,47 @@
+---
+id: B-395
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-395 — Read create-pr's omitted-limit review fallback from the posted commit in sync as the review stub does
+depends_on: []
+order: 110
+tags: [roadmap-item]
+project: baton
+description: B-324's review found that with review.max_runs omitted, sync reads review-defaults.json from the working tree while the stub reads it from the commit, so they can route a round differently.
+repos: [baton]
+---
+
+**Found by:** the review of B-324's PR, round 2 ([`docs/review/B-324-round-2.mdx`](../docs/review/B-324-round-2.mdx)). #408 was merged on 2026-11-25 with this finding open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §5.3](../spec/BATON_SPEC/05-courses.md#sec-5-3) ([R-BTN-63](../spec/BATON_SPEC/05-courses.md#sec-5-3), `max_runs`), [§5.8](../spec/BATON_SPEC/05-courses.md#sec-5-8) (the standard courses' stubs).
+
+**Depends on:** none.
+
+### What is open
+
+1. When `review.max_runs` is omitted from `create-pr`'s `course.json`, `baton repo sync` reads the fallback from `review-defaults.json` in the working tree (`src/defaults/sync.ts`), while the review stub reads it from the posted commit (`src/defaults/stub-runtime.ts`). With an uncommitted edit, sync posts one bound under the commit's SHA and the stub at that SHA routes by another, so Baton shows `fix` next while the stub suspends at `adjudicate` ([thread](https://github.com/immediately-run/baton/pull/408#discussion_r4677818348)).
+
+### What to build
+
+1. Read the effective review bound from the same commit on both paths: sync reads `review-defaults.json` (and `course.json`, if it reads it from disk today) at the snapshot's commit, or refuses to post when the working tree differs from it there.
+2. A regression with `review.max_runs` omitted: a committed fallback of 3 and an uncommitted edit to 5; sync and the stub agree (or sync refuses), and round 3's changes verdict routes the same way on both.
+
+### Exit criteria
+
+- The regression above passes; the existing B-324 cases (graph precedence, the signed course commit, the comparison replay) still pass.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the bound comes from the reviewed commit Baton already reads, never from an uncommitted file.
+
+### Invariants
+
+- R-BTN-63: the stub and Baton read the same `max_runs`, so their stations agree.
+- No generated stub carries a round-count literal.
+
+## Status
+
+_filed 2026-11-27._

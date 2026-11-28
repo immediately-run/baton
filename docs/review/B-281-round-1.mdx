@@ -1,0 +1,20 @@
+---
+title: B-281 review round 1
+description: Findings and disposition for the first review of the typed stub runtime, all fixed before the next round.
+---
+
+Reviewed [Baton #375](https://github.com/immediately-run/baton/pull/375) at `ef09cc0a`
+([review](https://github.com/immediately-run/baton/pull/375#pullrequestreview-6016095848), [verdict comment](https://github.com/immediately-run/baton/pull/375#issuecomment-7090397606)). The
+verdict was changes: the reviewer found two blocking findings and one should-fix, each verified
+in a disposable checkout; the 164 focused tests, typecheck and the installed-package check
+passed.
+
+Every finding was fixed in `f6762774`, with a reply on each thread. Round two (archived in
+[`B-281-round-2`](B-281-round-2.mdx)) closed the second and third and found the first still
+open in another form.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: `--check` can certify stubs that differ from the pinned commit, because the SHA comes from HEAD but the bundle from the working tree](https://github.com/immediately-run/baton/pull/375#discussion_r4661416421) | Fixed in `f6762774`: source init refuses inputs that differ from the checkout commit. Round two found Git status could still miss an edit, fixed there. |
+| [Blocking: the check reads only the top-level stub path, while the runner selects by basename and extracts symlink blobs](https://github.com/immediately-run/baton/pull/375#discussion_r4661416429) | Fixed in `f6762774`: nested duplicates and non-regular stub paths are rejected. |
+| [Should-fix: the suggested next step cannot work for pins that predate `--check`](https://github.com/immediately-run/baton/pull/375#discussion_r4661416431) | Fixed in `f6762774`: the diagnostic and the docs say older pins must be upgraded first. |

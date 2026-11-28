@@ -1,0 +1,26 @@
+---
+title: B-54 review round 2
+description: Findings and disposition for the second review of the declarative view renderers, merged with one should-fix and four nits open.
+---
+
+Reviewed [Baton #178](https://github.com/immediately-run/baton/pull/178) at `4a818a71` ([review](https://github.com/immediately-run/baton/pull/178#pullrequestreview-5774098593)). The
+verdict was changes: one pass re-verified every round-one fix in the checkout and on CI, and
+found the model report still missing (blocking), the body corrections not yet made, and one
+should-fix and four nits in the new code.
+
+The author closed the two body findings by editing the body
+([comment](https://github.com/immediately-run/baton/pull/178#issuecomment-6641596977)): it carries a passing `npm run model:pr` report for
+`4a818a71` and the corrected claims. No fix leg ran on the inline findings. The head then moved
+only to resolve conflicts, and the PR was merged on 2026-11-06 by the owner's bypass of the
+`report` check, because the scenario-trace replay hangs on the available machines
+([comment](https://github.com/immediately-run/baton/pull/178#issuecomment-6681892680)). The open findings are carried by B-397.
+
+| Finding | Disposition |
+|---|---|
+| Blocking (PR body): the model report is still missing and `report` red | Fixed: the body carries a passing report for `4a818a71`, later `cb27c76d`. |
+| Should-fix (PR body): the `el()` claim, Fit answer 3 and the test count were not corrected as replies said | Fixed in the same body edit. |
+| [Should-fix: the `time` field parses with `Date.parse`, so a value that is not RFC 3339 is drawn as a time, differently per host time zone](https://github.com/immediately-run/baton/pull/178#discussion_r4471984881) | Open on `main` (`src/shared/view.mjs` still calls `Date.parse`). Carried by B-397. |
+| [Nit: `CONTROL` misses U+061C, so a value carrying it still reorders text in the plain channel](https://github.com/immediately-run/baton/pull/178#discussion_r4471984897) | Open on `main`. Carried by B-397. |
+| [Nit: `renderEvent` appends its slot raw, trusting the caller to sanitise it](https://github.com/immediately-run/baton/pull/178#discussion_r4471984963) | Open on `main`. Carried by B-397. |
+| [Nit: a non-string `status` value can pick up a tone](https://github.com/immediately-run/baton/pull/178#discussion_r4471984944) | Open on `main`. Not carried (nit). |
+| [Nit: a comment says `std:api-capacity@1` uses only the subset's keywords, though it now carries `x-baton-view`](https://github.com/immediately-run/baton/pull/178#discussion_r4471984996) | Open on `main`. Not carried (nit). |

@@ -1,0 +1,19 @@
+---
+title: B-275 review round 1
+description: Findings and disposition for the first review of logging refused workflow dispatches; all four findings were fixed on the branch.
+---
+
+Reviewed [Baton #366](https://github.com/immediately-run/baton/pull/366) at `f1a78b01`
+([review](https://github.com/immediately-run/baton/pull/366#pullrequestreview-6014130902)). The
+verdict was changes: the reviewer confirmed the stubbed 422 scenario (the webhook answers 204, the
+stamp stays, a capped reason is recorded), ran typecheck and 71 targeted tests, and found gaps in
+redaction, the body read's deadline and the refusal classification.
+
+The PR was merged on 2026-11-24. Every finding of this round was fixed in `a5993e92`.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the redaction uses the untrimmed token, not the one Fetch sends](https://github.com/immediately-run/baton/pull/366#discussion_r4659713330) | Fixed in `a5993e92`. |
+| [Blocking: a stalled 422 body holds the discrepancy and the local host's stop](https://github.com/immediately-run/baton/pull/366#discussion_r4659713335) | Fixed in `a5993e92`. |
+| [Should-fix: a transport failure is logged as a forge refusal](https://github.com/immediately-run/baton/pull/366#discussion_r4659713338) | Fixed in `a5993e92`. |
+| [Should-fix: bracket-prefixed `text/plain` is parsed as JSON and discarded](https://github.com/immediately-run/baton/pull/366#discussion_r4659713340) | Fixed in `a5993e92`. |

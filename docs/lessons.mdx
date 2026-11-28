@@ -554,3 +554,23 @@ moved ticket. What changed: bering's CLI rolled back to `d78f5339`; the fix make
 self-contained and adds a test that runs it from an otherwise empty directory. Before moving a
 runner's CLI, run one source check by hand against it (`echo '[]' | node <wrapper> describe
 <home>/.baton/tickets.mjs` from a directory holding only the wrapper).
+
+## 2026-11-27 — Baton's station is the record, but the sync could still write it, and the ticket file only copies it
+
+Evidence: [interventions, 2026-11-27](interventions.mdx) (93 tickets);
+[#468](https://github.com/immediately-run/baton/pull/468) (the 0.1 plan, corrected after it
+ranked merged tickets); [#469](https://github.com/immediately-run/baton/pull/469) (the sweep and
+its list of 33); B-374; `src/core/stations.ts` ("git wins", `git-moved`).
+
+**By design Baton's station is the single source of truth for where a ticket is (R-BTN-39: "No
+ticket file, marker, PR or snapshot places a ticket"), but the code still let the sync's station
+function place tickets from PR markers, and nothing wrote Baton's closure back to the ticket
+file.** The two disagreed on 93 tickets; Baton recorded a `position-disagrees` for each and nothing
+acted on it. Reading the files put six finished tickets into the 0.1 plan's first phase; the
+sync's placement put 33 unfinished ones at `merged`, hidden from every runner, B-122 among them.
+What changed: #469 closed the 56 delivered; the owner, 2026-11-28, put the fix in 0.1 — no snapshot
+places a ticket (B-120), a Baton-shipped git proxy reads what merged and the sync's forge half
+retires (B-401 to B-405), and a `close` leg writes Baton's closure to the store (B-374). Until
+they land: read Baton, never the file (`baton tickets check <id> --claimable`, or
+`GET /v1/repositories/<repository>/tickets`), and before trusting a `merged`, read the PR it came
+from. *Still true* until B-120 and B-374 land.

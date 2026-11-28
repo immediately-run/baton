@@ -1,0 +1,20 @@
+---
+title: B-239 review round 2
+description: Findings and disposition for the second review of the materialized eligibility inputs, merged with two read-path findings open.
+---
+
+Reviewed [Baton #359](https://github.com/immediately-run/baton/pull/359) at `58e39c2d`
+([review](https://github.com/immediately-run/baton/pull/359#pullrequestreview-6017945276)). The
+verdict was changes: the round-1 role-loss and no-match findings were closed, but probes on the
+180-ticket Cloudflare fixture showed the short claim prefix choosing a different ticket from the
+reference ordering, the saturated-lane budget still exceeded, and the executor able to hang on a
+pipe a descendant holds; the 41 focused tests and typecheck passed.
+
+The PR was merged on 2026-11-25, with this round's findings open. No fix leg ran after this round:
+the later commits merge `main`. The open findings are carried by B-379.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the short claim prefix can claim a different ticket from the existing order](https://github.com/immediately-run/baton/pull/359#discussion_r4662911156) | Open on `main` (`src/core/claims.ts` still treats a first page as conclusive unless every row of a group is expedited, so 49 expedited rows and one ordinary row that fails the final checks still conclude). Carried by B-379. |
+| [Blocking: with 50 expedited tickets on page one a cold claim reads 507 rows](https://github.com/immediately-run/baton/pull/359#discussion_r4662911167) | Open on `main` (`decide` still falls back to `recommend(w, 50)`, which gates the whole page). Carried by B-379. |
+| [Blocking: the executor resolves only on `close`, so a descendant holding a pipe delays or hangs the result](https://github.com/immediately-run/baton/pull/359#discussion_r4662911175) | Fixed on `main` since: `16959c4e` (B-316) destroys the pipes one second after `exit`, and this PR's merge `82dfe3f3` took that version. |

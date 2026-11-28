@@ -1,0 +1,16 @@
+---
+title: B-113 review round 2
+description: Findings and disposition for the second review of qualified cross-repository dependencies, its one finding fixed before merge.
+---
+
+Reviewed [Baton #279](https://github.com/immediately-run/baton/pull/279) at `75c8a856`
+([review](https://github.com/immediately-run/baton/pull/279#pullrequestreview-5963278600), [verdict comment](https://github.com/immediately-run/baton/pull/279#issuecomment-6988748739)). The
+verdict was changes: one fresh reviewer verified all seven of round one's closures, ran the full
+suite, and simulated the merge into `main`, which showed one blocking finding.
+
+The finding was fixed in `3998b1df`, with the merge of `main`. No further review round ran; the
+PR was merged on 2026-11-19 with no finding open.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the scenario id `S-BTN-235` is taken on `main` by B-242, and the merge would keep both rows](https://github.com/immediately-run/baton/pull/279#discussion_r4619374577) | Fixed in `3998b1df`: renumbered to S-BTN-241, with the migration renumbered behind `main`'s. |

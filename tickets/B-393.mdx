@@ -1,0 +1,48 @@
+---
+id: B-393
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-393 — An imported ticket position survives a held post and an off-graph placement until a valid placement restores it
+depends_on: []
+order: 108
+tags: [roadmap-item]
+project: baton
+description: "Two open findings from B-302's third review: a held post can queue a ticket whose imported position is pending, and an unknown-station placement consumes the pending position."
+repos: [baton]
+---
+
+**Found by:** the review of B-302's PR, round 3 ([`docs/review/B-302-round-3.mdx`](../docs/review/B-302-round-3.mdx)). #340 was merged on 2026-11-25 with these findings open, after the third review round still found blockers. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §4.8](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8) ([R-BTN-88](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-8), owner state: imported positions stay pending until placement), [§4.4](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-4) (the board post: held posts and unplaced tickets).
+
+**Depends on:** none.
+
+### What is open
+
+1. A held post skips `applyPending` but still passes its placements to `Stations.apply` (`refreshStations` in `src/core/sync.ts`). If the ticket was earlier listed without a placement, this queues it at the posted station while its imported position is still pending; a later accepted placement then inserts a second `ticket_stations` row (`applyPending` in `src/core/ownerState.ts`) and the post rolls back ([thread](https://github.com/immediately-run/baton/pull/340#discussion_r4657473706)).
+2. `applyPending` consumes the pending row whenever the post's station map names the ticket, before any course-name check. A syntactically valid but unknown station is then cleared as off-graph by `Stations.apply` without refusing the post, and the next valid refresh has no imported position left to restore ([thread](https://github.com/immediately-run/baton/pull/340#discussion_r4657473709)).
+
+### What to build
+
+1. Keep a ticket whose imported position is still pending out of a held post's station writes.
+2. Keep the pending row until the placement passes the same course-name checks `Stations.apply` uses, so an off-graph placement leaves the imported position for a later valid one.
+
+### Exit criteria
+
+- `test/integration/S-BTN-50.owner-state.test.ts` covers, on both hosts, a held-to-accepted transition for a ticket with a pending imported position, and an unknown-station placement followed by a valid one that restores the imported position.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the export and the board post are already validated; this changes when Baton applies a row it already holds.
+
+### Invariants
+
+- R-BTN-39: Baton's stored position wins over a stale placement.
+- An unplaced ticket is never offered (§4.4), and an import or a post either commits whole or rolls back.
+
+## Status
+
+_filed 2026-11-27._

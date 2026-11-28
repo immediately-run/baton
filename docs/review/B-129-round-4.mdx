@@ -1,0 +1,16 @@
+---
+title: B-129 review round 4
+description: Findings and disposition for the fourth and approving review of the claim that asks Baton first.
+---
+
+Reviewed [Baton #160](https://github.com/immediately-run/baton/pull/160) at `8cb2199` ([verdict comment](https://github.com/immediately-run/baton/pull/160#issuecomment-6605693788)). The
+verdict was approve: one fresh reviewer found all four of round three's closures held and raised
+no blocking finding, one should-fix and one nit.
+
+Both were fixed in `3937151`, a text and type-cast change, which became the merged head. The PR
+was merged on 2026-11-04 with nothing open.
+
+| Finding | Disposition |
+|---|---|
+| Should-fix: R-BTN-33's opaque-blobs bullet and the §12 payload sketch still said core never reads `display` | Fixed in `3937151`: both cite R-BTN-33's exception. |
+| Nit: `readSettingsJson`'s comment and cast did not name `default_course` | Fixed in `3937151`. |

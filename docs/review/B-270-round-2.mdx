@@ -1,0 +1,18 @@
+---
+title: B-270 review round 2
+description: Findings and disposition for the second review of bounding the Runners view's history reads, merged with an owner question and a spec row open.
+---
+
+Reviewed [Baton #390](https://github.com/immediately-run/baton/pull/390) at `d877721a`
+([review](https://github.com/immediately-run/baton/pull/390#pullrequestreview-6025124513)). The
+verdict was changes: the lease-expiry parity finding was closed, but the reviewer held that
+restating the Target does not settle the brief's constant-per-poll budget, after a focused local and
+Cloudflare run passed.
+
+The PR was merged on 2026-11-24 at this head, with this round's findings open. No fix leg ran after
+this round. The open findings are carried by B-381.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the brief asks for a constant per-poll history budget, and every live runner id still goes to the three lookups; the owner must accept the per-live-runner budget or a fixed selection bound must be set and tested](https://github.com/immediately-run/baton/pull/390#discussion_r4668530775) | Open on `main` (`tickets/B-270.mdx`'s Brief still says constant; its Target says the budget scales with the live set). Put to the owner in B-381. |
+| [Should-fix: S-BTN-243 still says the runners read finds each runner's newest report and transcript, against the live-only contract](https://github.com/immediately-run/baton/pull/390#discussion_r4668530799) | Open on `main` (`spec/BATON_SPEC/15-verification.md`, S-BTN-243's row unchanged). Carried by B-381. |

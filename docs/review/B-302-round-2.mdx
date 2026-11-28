@@ -1,0 +1,16 @@
+---
+title: B-302 review round 2
+description: Findings and disposition for the second review of the owner-state move, its one blocker fixed before round 3.
+---
+
+Reviewed [Baton #340](https://github.com/immediately-run/baton/pull/340) at `35b783a3`
+([review](https://github.com/immediately-run/baton/pull/340#pullrequestreview-6011254638)). The verdict was changes: the round-1 fixes passed the
+focused suite (93 tests, S-BTN-50 on Node and Cloudflare), but tracing the new-head transaction
+showed the restored queue conflicting with the rule that an unplaced ticket is not offered.
+
+A fix leg answered at `30983959`, and round 3 reviewed the result. The PR was merged on
+2026-11-25.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a first new-head post that lists a restored ticket without placing it makes it claimable](https://github.com/immediately-run/baton/pull/340#discussion_r4657357229) | Fixed in `30983959` (an imported position stays pending, with no ready queue, until a post places the ticket). |

@@ -1,0 +1,50 @@
+---
+id: B-376
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-376 — Make the compromised-runner runbook's policy block, stop instruction and drill checks work as written
+depends_on: []
+order: 91
+tags: [roadmap-item]
+project: baton
+description: The B-125 runbook's step-1 policy commands fail when followed literally, its drill passes on refused worker calls, and it points the graceful stop at a dashboard view that does not exist.
+repos: [baton]
+---
+
+**Found by:** the review of B-125's PR, round 1 ([`docs/review/B-125-round-1.mdx`](../docs/review/B-125-round-1.mdx)). #248 was merged on 2026-11-16 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-188](../spec/BATON_SPEC/12-security.md#sec-12-8), the policy read and write), [BATON_SPEC §8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-119](../spec/BATON_SPEC/08-runners.md#sec-8-4), stopping a running leg), [BATON_SPEC §5.6](../spec/BATON_SPEC/05-courses.md#sec-5-6) ([R-BTN-67](../spec/BATON_SPEC/05-courses.md#sec-5-6), owner bars).
+
+**Depends on:** none.
+
+### What is open
+
+1. The runbook's step-1 policy block fails when followed literally: `baton owner policy show` prints the whole read, `policy diff` compares the file against its inner `.policy`, and `policy set` sends the file as the policy document, which the server refuses (`policy.repository: unknown field`). The drill passes only because it extracts `.policy` into a second file, so the page's claim that the drill runs every command as written does not hold ([thread](https://github.com/immediately-run/baton/pull/248#discussion_r4582131946)). Separately, B-125's own status note of 2026-11-24 strikes the "drop `machine` from `inputs.board`" step, which the page still carries.
+2. The drill's stand-in worker (`worker.mjs` in `scripts/drill-compromise.sh`) exits 0 on any HTTP answer, so the ack, the end and the resume claim pass when refused, and a refused end lets the bar probe count a `one-claim-per-worker` refusal as the `barred-tag` proof ([thread](https://github.com/immediately-run/baton/pull/248#discussion_r4582131953)).
+3. The runbook says a single claim can be stopped from the dashboard's Running view (Stop leg, R-BTN-119); no such view or control exists, so under pressure the operator finds only force-reap ([thread](https://github.com/immediately-run/baton/pull/248#discussion_r4582131957)).
+
+### What to build
+
+1. In `docs/runbooks/compromised-runner.mdx`, either write only the `.policy` object back to a second file and `diff`/`set` that (as the drill does), or, if `inputs.board` no longer governs a machine key's post on `main`, remove the block and say why; make the drill run exactly what the page prints.
+2. Make `worker.mjs` exit non-zero on a status of 400 or more, and have the drill check the ack, end and final claim the way it already checks the initial claims; make the bar probe match `barred-tag` specifically.
+3. Point the graceful stop at the control the current dashboard has for R-BTN-119's release (or the CLI's `leg stop`), and keep force-reap named as the fencing fallback.
+
+### Exit criteria
+
+- `scripts/drill-compromise.sh` runs every command block of the runbook verbatim and exits non-zero when any worker call is refused (checked with a forced refusal).
+- `npm run check:wiki`, `npm test` and `npm run typecheck` green.
+
+### Trust
+
+The runbook is followed by a person during an incident and the drill uses throwaway keys on a scratch repository; no live credential is read or changed by this work.
+
+### Invariants
+
+- Every command the runbook prints is one the drill executes as printed.
+- A refused call in the drill fails the drill.
+
+## Status
+
+_filed 2026-11-27._

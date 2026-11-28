@@ -1,0 +1,19 @@
+---
+title: B-300 review round 2
+description: Findings and disposition for the second review of the dashboard headers and destructive-action confirmations, merged with a release-ordering blocker and a should-fix open.
+---
+
+Reviewed [Baton #341](https://github.com/immediately-run/baton/pull/341) at `06c5eafd`
+([review](https://github.com/immediately-run/baton/pull/341#pullrequestreview-6011269465), [verdict comment](https://github.com/immediately-run/baton/pull/341#issuecomment-7076616418)). The
+verdict was changes: the reviewer verified round one's fixes and found that the CLI release the
+runbooks now require does not exist while production deploys on every push to `main`, plus a
+history entry that omits a changed rule; 30 focused tests and the drill's shell syntax passed.
+
+The PR was merged on 2026-11-25 with this round's findings open. No fix leg ran after this round;
+the later commits merged `main` and made S-BTN-52's Stop carry `confirm: true`. The open findings
+are carried by B-392.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: no published CLI release sends `confirm: true`, so a deploy of this merge refuses emergency revocations before operators have a supported client](https://github.com/immediately-run/baton/pull/341#discussion_r4657364373) | Open on `main`: `package.json` is still 0.1.4. Publishing and deploying are the owner's; carried by B-392 for the owner. |
+| [Should-fix: the 2026-11-22 history entry's `Rules changed:` line omits R-BTN-138](https://github.com/immediately-run/baton/pull/341#discussion_r4657364376) | Open on `main` (`spec/BATON_SPEC_HISTORY.md`). Carried by B-392. |

@@ -1,0 +1,28 @@
+---
+title: R3-1263 review round 1
+description: Findings and disposition for the first review of pulled syncs and the forge dispatch adapters; all thirteen findings were fixed on the branch.
+---
+
+Reviewed [Baton #311](https://github.com/immediately-run/baton/pull/311) at `ba1655cd`
+([review](https://github.com/immediately-run/baton/pull/311#pullrequestreview-6004812930)). The
+verdict was changes: the reviewer ran typecheck, the model links and 15 focused tests on both
+hosts, and found that sync producers did not share the persisted dispatch window, several wants
+were never recorded, and polling, import and local secrets broke their stated invariants.
+
+The PR was merged on 2026-11-26. Every finding of this round was fixed in `e4a8b9d5`.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a webhook then a sync or owner request can dispatch twice in one window](https://github.com/immediately-run/baton/pull/311#discussion_r4652158232) | Fixed in `e4a8b9d5`. |
+| [Blocking: the backstop renews wants for repositories with no dispatch target](https://github.com/immediately-run/baton/pull/311#discussion_r4652158237) | Fixed in `e4a8b9d5`. |
+| [Blocking: a GitHub webhook does not wake a non-GitHub home that lists the source](https://github.com/immediately-run/baton/pull/311#discussion_r4652158240) | Fixed in `e4a8b9d5`. |
+| [Blocking: an unblocking records no sync want](https://github.com/immediately-run/baton/pull/311#discussion_r4652158242) | Fixed in `e4a8b9d5`. |
+| [Blocking: a pull-only mirror cannot see the seal's pending acknowledgment](https://github.com/immediately-run/baton/pull/311#discussion_r4652158244) | Fixed in `e4a8b9d5`. |
+| [Blocking: polling still writes the usage counter](https://github.com/immediately-run/baton/pull/311#discussion_r4652158247) | Fixed in `e4a8b9d5`; round 3 found polling can still arm the alarm. |
+| [Blocking: local secret files are read without a mode check](https://github.com/immediately-run/baton/pull/311#discussion_r4652158250) | Fixed in `e4a8b9d5`. |
+| [Blocking: import passes dispatch targets to SQL unvalidated](https://github.com/immediately-run/baton/pull/311#discussion_r4652158253) | Fixed in `e4a8b9d5`; round 3 found the check refusing a same-version export. |
+| [Blocking: an incomplete App configuration falls back to the static token](https://github.com/immediately-run/baton/pull/311#discussion_r4652158255) | Fixed in `e4a8b9d5`. |
+| [Should-fix: retention does not use the new mirror predicate](https://github.com/immediately-run/baton/pull/311#discussion_r4652158256) | Fixed in `e4a8b9d5`. |
+| [Should-fix: held posts do not backfill the posted SHA](https://github.com/immediately-run/baton/pull/311#discussion_r4652158258) | Fixed in `e4a8b9d5` (the migration later renumbered at the merge of `main`). |
+| [Should-fix: the import test asserts after a post that can clear the want](https://github.com/immediately-run/baton/pull/311#discussion_r4652158261) | Fixed in `e4a8b9d5`. |
+| [Should-fix: R-BTN-94 and §14 still describe the routes as unbuilt](https://github.com/immediately-run/baton/pull/311#discussion_r4652158263) | Fixed in `e4a8b9d5`. |

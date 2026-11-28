@@ -1,0 +1,21 @@
+---
+title: B-141 review round 1
+description: Findings and disposition for the first review of the read-only review harness, all five blocking findings fixed before the next round.
+---
+
+Reviewed [Baton #334](https://github.com/immediately-run/baton/pull/334) at `5f8dfdc0`
+([review](https://github.com/immediately-run/baton/pull/334#pullrequestreview-6009786888), [verdict comment](https://github.com/immediately-run/baton/pull/334#issuecomment-7073028486)). The
+verdict was changes: the reviewer found five blocking gaps between the read-only launch and
+R-BTN-183's requirements; both S-BTN-310 tests and `npm run typecheck` passed, and the full
+`npm test` run hit its timeout without a result.
+
+Every finding was fixed in `c322ddc6`, with a reply on each thread, and round two reviewed that
+head.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the launch reads no native configuration from the default-branch snapshot, so snapshot-only providers or agents are missing while ambient configuration is still discovered](https://github.com/immediately-run/baton/pull/334#discussion_r4656229800) | Fixed in `c322ddc6`: the stub reads supported OpenCode and Claude settings from the pinned snapshot tree. |
+| [Blocking: an older runner that does not forward `reads_only` takes the ordinary launch with `--auto` or the permission bypass](https://github.com/immediately-run/baton/pull/334#discussion_r4656229803) | Fixed in `c322ddc6`: the shipped stub refuses a declared read-only leg when the runner supplies no enforcement context, and S-BTN-310 covers the mixed-version case. |
+| [Blocking: the review commit is read from the claim checkout rather than the home object store, so a valid pinned commit can be refused](https://github.com/immediately-run/baton/pull/334#discussion_r4656229806) | Fixed in `c322ddc6`: the runner names the home store and the stub reads the pinned objects there. |
+| [Blocking: a ticket with a path is read from the Git tree instead of the claim source's verified text](https://github.com/immediately-run/baton/pull/334#discussion_r4656229808) | Fixed in `c322ddc6`: read-only legs get the verified source text with or without a path. |
+| [Blocking: the scenario's fake executable writes the marker itself, so it cannot show the real harness leaves a branch plugin unloaded](https://github.com/immediately-run/baton/pull/334#discussion_r4656229810) | Fixed in `c322ddc6`: a credential-free check of the installed OpenCode's configuration, plugin inventory and agent permissions. |

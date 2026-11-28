@@ -1,0 +1,22 @@
+---
+title: B-173 review round 1
+description: Findings and disposition for the first review of repository retirement; every finding was fixed or answered before merge.
+---
+
+Reviewed [Baton #230](https://github.com/immediately-run/baton/pull/230) at `08443594`
+([review](https://github.com/immediately-run/baton/pull/230#pullrequestreview-5886697856)). The
+verdict was changes: two blind reviewers ran `npm test` on both hosts, typecheck and the wiki,
+ticket and spec checks, confirmed all eight item-6 tickets carry their retirement step, and found
+that a retired repository's policy still blocks key revocation.
+
+The PR was merged on 2026-11-15. Every finding of this round was fixed or answered before merge.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a retired repository's policy still blocks key revocation](https://github.com/immediately-run/baton/pull/230#discussion_r4560058958) | Fixed in `14766147`. |
+| [Should-fix: no backfill for rows retired before this deploy](https://github.com/immediately-run/baton/pull/230#discussion_r4560058966) | Fixed in `14766147`. |
+| [Should-fix: the bars live-join, the seed's whole-entry skip and the mode route's check are untested](https://github.com/immediately-run/baton/pull/230#discussion_r4560058970) | Fixed in `14766147`. |
+| [Nit: `admin repo retire` neither asks nor takes `--yes`](https://github.com/immediately-run/baton/pull/230#discussion_r4560058975) | Fixed in `14766147`. |
+| [Nit: two edges of the not-found check around the cutover gate](https://github.com/immediately-run/baton/pull/230#discussion_r4560058979) | Fixed in `14766147`. |
+| [Nit: seven queries re-spell the live predicate in SQL](https://github.com/immediately-run/baton/pull/230#discussion_r4560058987) | Answered: per-row filters inside stores that hold no `Registry`; `Registry.live` stays the one predicate a rule reads. Accepted in round 2. |
+| [Nit: a change naming a retired id answers `conflict`, not `not-found`](https://github.com/immediately-run/baton/pull/230#discussion_r4560058990) | Answered: R-BTN-47's "never registered again (`conflict`)" covers a change that would bring the id back. Accepted in round 2. |

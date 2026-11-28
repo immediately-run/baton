@@ -1,0 +1,25 @@
+---
+title: B-249 review round 1
+description: Findings and disposition for the first review of the lease grace after Baton's own downtime.
+---
+
+Reviewed [Baton #353](https://github.com/immediately-run/baton/pull/353) at `7dab6ce6`
+([review](https://github.com/immediately-run/baton/pull/353#pullrequestreview-6012820716)). The
+verdict was changes: the reviewer checked the change against §9.5 and R-BTN-19, found that
+runner-wide reaps still strand a sibling claim during recovery and that the retry test does not
+follow the runner's order, and ran 57 targeted tests on both hosts and the model links; its full
+`npm test` timed out.
+
+A fix leg answered every thread at `f5c7c732`, and round 2 reviewed the result. Separately, a
+supervising agent's [scope note](https://github.com/immediately-run/baton/pull/353#issuecomment-7082741701)
+asked for the PR's runner-masking change to be dropped, since #354 fixed it on `main`. The PR was
+merged on 2026-11-25.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: force-reap and retirement still set `reaped_at` runner-wide, so a sibling claim cannot deliver its end](https://github.com/immediately-run/baton/pull/353#discussion_r4658533707) | Fixed in `f5c7c732` (`markRunnerReaped` skips a runner that still holds a claim). |
+| [Blocking: the test heartbeats before the end, the reverse of the runner's order](https://github.com/immediately-run/baton/pull/353#discussion_r4658533714) | Fixed in `f5c7c732` (a failed end during the outage is replayed before any heartbeat). |
+| [Should-fix: stamp sampling can turn a sub-lease gap into a full extra lease](https://github.com/immediately-run/baton/pull/353#discussion_r4658533716) | Fixed in `f5c7c732` by subtracting the sampling period; round 2 found that this leaves the other side of the boundary unprotected ([B-249 round 2](B-249-round-2.mdx)). |
+| [Should-fix: a `304` reply is not counted as service](https://github.com/immediately-run/baton/pull/353#discussion_r4658533719) | Fixed in `f5c7c732`. |
+| [Should-fix: holder reads still compute lease expiry from `last_seen_at` alone](https://github.com/immediately-run/baton/pull/353#discussion_r4658533722) | Fixed in `f5c7c732` (the reads share `CLAIM_LEASE_END_SQL`). |
+| [Should-fix: the runner redaction change is out of scope and its overlap check is incomplete](https://github.com/immediately-run/baton/pull/353#discussion_r4658533725) | Fixed in `f5c7c732`, then dropped: merge `58b71a79` took `main`'s `mask.ts` (#354), so the PR ships no `mask.ts` change. |

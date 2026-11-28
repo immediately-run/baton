@@ -1,0 +1,23 @@
+---
+title: B-277 review round 2
+description: Findings and disposition for the second review of the spec-copy checks, merged with six blocking gaps and one should-fix open.
+---
+
+Reviewed [Baton #370](https://github.com/immediately-run/baton/pull/370) at `08d5589b`
+([review](https://github.com/immediately-run/baton/pull/370#pullrequestreview-6015003130)). The
+verdict was changes: the four repository checks passed and `spec:impact` now reported tooling
+citations, but the reviewer built further cases the checks still miss; 34 focused tests passed.
+
+The PR was merged on 2026-11-25 at `f6efcdbd`, whose only change after this round is a merge of
+`main`, with this round's findings open. No fix leg ran after this round. The open findings are
+carried by B-385.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: on a push run the baseline is HEAD's first parent, not the push's `before` SHA, so a multi-commit push can add an exception](https://github.com/immediately-run/baton/pull/370#discussion_r4660463442) | Open on `main` (`scripts/lib/check-exceptions.mjs` still reads the first parent for `push`). Carried by B-385. |
+| [Blocking: section-pair exceptions have no prior ceiling](https://github.com/immediately-run/baton/pull/370#discussion_r4660463445) | Open on `main` (`scripts/check-spec.mjs` checks `section-pair-exceptions.json` with `exceptionProblems`, not against a baseline). Carried by B-385. |
+| [Blocking: the route guard is validated only at its top level, so an extra method check yields a partial inventory silently](https://github.com/immediately-run/baton/pull/370#discussion_r4660463446) | Open on `main` (`scripts/lib/core-routes.mjs` unchanged in shape). Carried by B-385. |
+| [Blocking: tables without an opening pipe are dropped, and pipe rows inside fenced examples are read](https://github.com/immediately-run/baton/pull/370#discussion_r4660463448) | Open on `main` (`scripts/check-api.mjs` still matches lines). Carried by B-385. |
+| [Blocking: comma-separated section/rule pairs are not checked](https://github.com/immediately-run/baton/pull/370#discussion_r4660463451) | Open on `main` (the pair regex in `scripts/check-spec.mjs` allows no comma; `src/core/baton.ts` still has one). Carried by B-385. |
+| [Blocking: a code-span filename with an unlisted suffix is never checked](https://github.com/immediately-run/baton/pull/370#discussion_r4660463455) | Open on `main` (`scripts/lib/wiki-references.mjs` keeps its suffix list). Carried by B-385. |
+| [Should-fix: §14's GET/HEAD parity claim is unconditional, but the sealed gate answers HEAD differently](https://github.com/immediately-run/baton/pull/370#discussion_r4660463458) | Open on `main` (`spec/BATON_SPEC/14-api.md` unchanged). Carried by B-385. |

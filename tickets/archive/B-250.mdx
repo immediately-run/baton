@@ -1,0 +1,45 @@
+---
+title: B-250 — The Workers view reads a constant number of queries, however many workers were ever registered
+id: B-250
+project: baton
+order: 3
+status: done
+updated: 2026-11-27
+repos:
+  - baton
+tags:
+  - roadmap-item
+description: workersView runs ~6 queries per worker row, reaped ones included (~1.9k statements per poll at 300 workers); join them
+topics:
+  - baton
+owns: {}
+prs: [https://github.com/immediately-run/baton/pull/281]
+depends_on: []
+---
+
+**What:** the dashboard's Workers view (`workersView`, src/core/workerApi.ts ~823) runs about six queries for *every* worker row ever registered — reaped ones included — on each `GET /v1/ui/state` poll: the latest transcript (a UNION over `transcripts` and `pending_transcripts`), `worker_capabilities`, the latest `status_report` message, and more. Measured on the B-240 harness with 300 old worker rows: ~1,865 statements per poll (~3.6k rows_read). Found while doing B-240 (PR #247), outside its scope.
+
+- Replace the per-worker loop with one query per list (joined or window-function reads keyed by `worker_id`), as B-240 did for Running and Timeline.
+- Serve reaped/long-unseen workers cheaply: either a bounded "recently seen" set in the main view with the rest on demand, or only the columns the view shows for them — whichever keeps the served JSON the dashboard relies on. R-BTN-3 keeps `workers` rows; this only changes what each poll reads.
+- Index what the joined reads need (e.g. `messages(from_worker_id, kind, id)` for the latest status report) where EXPLAIN shows a scan.
+
+**Target:** the Workers view costs a constant number of statements per poll, independent of how many workers were ever registered, and < 500 rows on the harness state.
+
+**Why:** production exceeded Cloudflare's free-tier Durable Objects limit of 5,000,000 `rows_read`/day on 2026-11-14 and again on 2026-11-15; every runner call returned 500 until the 00:00Z reset. This follows B-235–B-243, the owner's 2026-11-15 plan to bound what each read costs.
+
+**Done when:** a test asserts the statement count is the same for 10 and 300 workers, rows_read on the cloudflare host is at or below the target, and the served `workers` JSON is unchanged (a test compares old and new across the scenarios).
+
+### Trust
+
+No new input: queries over data Baton already stores; no field, file, commit trailer or request is added.
+
+### Invariants
+
+- R-BTN-3: worker rows are never deleted; only the view's reads change.
+- The dashboard's served shape for `workers`: the same JSON, compared by a test.
+
+## Status
+
+_filed 2026-11-15._
+
+_2026-11-27: closed in the 2026-11-27 sweep of tickets Baton held at merged with their files still open: #281 merged and the ticket file was never closed; review rounds archived in docs/review/B-250-round-*.mdx, https://github.com/immediately-run/baton/pull/281._

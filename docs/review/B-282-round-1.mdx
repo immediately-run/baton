@@ -1,0 +1,23 @@
+---
+title: B-282 review round 1
+description: Findings and disposition for the first review of lint in npm test and TypeScript project coverage, all seven fixed in one fix leg.
+---
+
+Reviewed [Baton #374](https://github.com/immediately-run/baton/pull/374) at `4b9598e1`
+([review](https://github.com/immediately-run/baton/pull/374#pullrequestreview-6016341685)). The
+verdict was changes: the ownership test could count projects that never compile, and some formerly
+shimmed exports still took `any`; typecheck, lint and the focused tests passed, and the reviewer
+audited the two new exact dev-only pins (`eslint@10.15.0`, `typescript-eslint@8.73.0`) and their 79
+lockfile entries.
+
+A fix leg answered all seven findings in `c52db6f2`. Round 2 reviewed that head.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the coverage gate counts projects the compiler never runs](https://github.com/immediately-run/baton/pull/374#discussion_r4661621512) | Fixed in `c52db6f2`. |
+| [Blocking: formerly shimmed exports still accept `any` at their boundaries](https://github.com/immediately-run/baton/pull/374#discussion_r4661621513) | Fixed in `c52db6f2`. |
+| [Should-fix: the clock rule misses `globalThis.Date.now()`](https://github.com/immediately-run/baton/pull/374#discussion_r4661621515) | Fixed in `c52db6f2`. |
+| [Should-fix: the markup rule misses a static template-literal `innerHTML` access](https://github.com/immediately-run/baton/pull/374#discussion_r4661621520) | Fixed in `c52db6f2`. |
+| [Should-fix: a Node-only test compiles against Worker-only types](https://github.com/immediately-run/baton/pull/374#discussion_r4661621523) | Fixed in `c52db6f2`. Round 2 found the project roots still overlap. |
+| [Should-fix: a declaration admits the review-capacity path without a matrix](https://github.com/immediately-run/baton/pull/374#discussion_r4661621526) | Fixed in `c52db6f2`. |
+| [Should-fix: a usage record's timestamp can be `undefined`, against its declaration](https://github.com/immediately-run/baton/pull/374#discussion_r4661621530) | Fixed in `c52db6f2`. |

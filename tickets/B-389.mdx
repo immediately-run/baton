@@ -1,0 +1,48 @@
+---
+id: B-389
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-389 — Make the test tsconfig projects' roots disjoint and type check-traces' expect entries as label-expression pairs
+depends_on: []
+order: 104
+tags: [roadmap-item]
+project: baton
+description: B-282's second review found tsconfig.test.json still compiling Node-only roots the node project owns, hidden by the coverage test's in-memory filter, and a loose expect type.
+repos: [baton]
+---
+
+**Found by:** the review of B-282's PR, round 2 ([`docs/review/B-282-round-2.mdx`](../docs/review/B-282-round-2.mdx)). #374 was merged on 2026-11-26 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** none (test and tooling configuration only).
+
+**Depends on:** none.
+
+### What is open
+
+1. `tsconfig.test.json` includes all of `test` except `test/ui`, so it still includes the Node-only roots `tsconfig.test-node.json` lists (`test/unit/defaults-cli.test.ts`, `test/hosts/local.ts`, `test/load/load.test.ts` among them). The coverage test strips the overlap in memory before counting, so it passes, while `tsc -p tsconfig.test.json` still checks those roots with Worker globals ([thread](https://github.com/immediately-run/baton/pull/374#discussion_r4661826490)).
+2. `scripts/check-traces.mjs` types a step's `expect` as `string[][]`, so a label-only entry type-checks and the renderer emits an `.expect()` with no predicate ([thread](https://github.com/immediately-run/baton/pull/374#discussion_r4661826493)).
+
+### What to build
+
+1. Make the checked-in test projects' roots disjoint (exclude the Node-only roster from `tsconfig.test.json`, or move to a directory convention both configs follow), and have the coverage test read each project's roots as `tsc` resolves them, before any filtering, failing on any file two projects own.
+2. Type `expect` entries as `[label: string, expression: string]` tuples, with a compile-only regression that rejects a one-element entry.
+
+### Exit criteria
+
+- `tsc --showConfig` for the two test projects lists no file in both; the coverage test fails on a fixture that adds one to both.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: the change is to type-checking configuration and a type annotation.
+
+### Invariants
+
+- Every `.ts` file is in exactly one compiled project, as B-282's coverage test states.
+- Node-only tests compile without Worker ambient types.
+
+## Status
+
+_filed 2026-11-27._

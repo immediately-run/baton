@@ -1,0 +1,34 @@
+---
+title: B-179 review round 1
+description: Findings and disposition for the first review of the spec split into section files with a generated index, fixed or answered before the next round.
+---
+
+Reviewed [Baton #173](https://github.com/immediately-run/baton/pull/173) at `e8c1eb1a` by two reviewers
+([reviewer B](https://github.com/immediately-run/baton/pull/173#pullrequestreview-5763606377), [reviewer A](https://github.com/immediately-run/baton/pull/173#pullrequestreview-5763623362)).
+No verdict comment was posted; the reviewers' records list one blocking finding, thirteen
+should-fix and three nits, so the round asked for changes. Both re-joined the section files and
+confirmed the move changed only the two front-matter links (sha-256 `ca8c0a92…5dd7849` on both
+sides), and ran `check:spec`, `check:wiki`, `check:tickets` and the spec-files tests.
+
+Every finding was fixed in `164977a7`, answered by the owner's ruling (applied in `cdc73ff5`) or
+answered in a reply, and round two checked them. Several of reviewer B's findings repeat reviewer
+A's and were closed with them.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: `check:spec` checks neither the parts' order nor the byte-identity of the move](https://github.com/immediately-run/baton/pull/173#discussion_r4463913936) | Fixed in `164977a7`: `partProblems` checks the numbered order; the proof is the one-time `--prove` command, recorded in the PR body and the history. |
+| [Should-fix: a misnamed part is dropped from the join without a word](https://github.com/immediately-run/baton/pull/173#discussion_r4463914428) | Fixed in `164977a7`: `layoutProblems` reports every entry that is not a part, and both readers use one filter. |
+| [Should-fix: a part with no final newline corrupts the join](https://github.com/immediately-run/baton/pull/173#discussion_r4463914875) | Fixed in `164977a7`. |
+| [Nit: CRLF line ends drop the section names from the index](https://github.com/immediately-run/baton/pull/173#discussion_r4463915317) | Fixed in `164977a7`: a part may not hold a `\r`. |
+| [Should-fix: `readSpecAt` is a drifted second copy of the reader and locator](https://github.com/immediately-run/baton/pull/173#discussion_r4463915683) | Fixed in `164977a7`: it reads through `specParts` and `locate`; the unused `readSpec` export is gone. |
+| [Should-fix: spec-tools' comment says CONFIG is its only difference from Fieldhouse's copy](https://github.com/immediately-run/baton/pull/173#discussion_r4463916479) | Fixed in `164977a7`. |
+| [Should-fix: every gate row in the index has the title `—`](https://github.com/immediately-run/baton/pull/173#discussion_r4463916864) | Fixed in `164977a7` (the fix copied gate statements into the index, which round two raised). |
+| [Should-fix: the topic table is generated, not the hand-written one the ticket prescribes](https://github.com/immediately-run/baton/pull/173#discussion_r4463917239) | Answered: the owner ruled "Keep it generated" (2026-11-04); `cdc73ff5` rewrote the ticket to match, and the script name is under Deviations. |
+| [Should-fix: no test reaches `check:spec`'s layout failure path](https://github.com/immediately-run/baton/pull/173#discussion_r4463917610) | Fixed in `164977a7`: `layoutProblems(root)` is tested on fixtures. |
+| [Should-fix (both reviewers): files still name `spec/BATON_SPEC.md` as the spec body](https://github.com/immediately-run/baton/pull/173#issuecomment-6623590557) | Fixed in `164977a7` for the docs, a test header, the MCP spec and the project page. Answered for the rest: `src/core/gates.ts`, `model/README.md` and `model/baton.qnt` (comments whose change needed a `model:pr` run) and `.github/workflows/ci.yml` (a CI workflow, the owner's) were left on purpose, since the index still resolves every id. They are still comments on `main`. |
+| [Nit: the PR body has no Deviations or Exit criteria section](https://github.com/immediately-run/baton/pull/173#issuecomment-6623590557) | Fixed in the PR body. |
+| [Should-fix: the hand-written topic table and its dangling-pointer check are missing](https://github.com/immediately-run/baton/pull/173#discussion_r4463899190) | Answered with the generated-table ruling above. |
+| [Should-fix: no assertion compares the join with the pre-move blob](https://github.com/immediately-run/baton/pull/173#discussion_r4463899504) | Fixed in `164977a7`, with the blocking finding. |
+| [Should-fix: the prescribed `spec:impact` and stale-index tests do not exist](https://github.com/immediately-run/baton/pull/173#discussion_r4463899801) | Fixed in `164977a7`. |
+| [Should-fix: misnamed, repeated or mis-headed parts pass, and the two readers filter differently](https://github.com/immediately-run/baton/pull/173#discussion_r4463900088) | Fixed in `164977a7`. |
+| [Nit: the exported `locate` has no caller](https://github.com/immediately-run/baton/pull/173#discussion_r4463900349) | Fixed in `164977a7`: `readSpecAt` calls it. |

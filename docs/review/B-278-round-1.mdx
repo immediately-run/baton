@@ -1,0 +1,22 @@
+---
+title: B-278 review round 1
+description: Findings and disposition for the first review of the SQL dialect lint and the Store conformance test, all fixed before the next round.
+---
+
+Reviewed [Baton #371](https://github.com/immediately-run/baton/pull/371) at `54210bdf`
+([review](https://github.com/immediately-run/baton/pull/371#pullrequestreview-6015157662), [verdict comment](https://github.com/immediately-run/baton/pull/371#issuecomment-7087781173)). The
+verdict was changes: the reviewer found the dialect gate missing SQLite-only spellings and not
+enforcing shrink-only in PR CI, and the populated migration untested; the focused Store, sequence
+and resource checks passed on both hosts, and the full `npm test` had one failure
+(S-BTN-41, `released:lease-lost`), also seen in CI.
+
+Every finding was fixed in `4b2a61d5`, with a reply on each thread, and round two verified them.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the shrink-only comparison silently skips in PR CI's depth-one checkout](https://github.com/immediately-run/baton/pull/371#discussion_r4660605761) | Fixed in `4b2a61d5`: the lint fetches the exact PR base, fails if it cannot, and allows the first introduction only after checking the base tree. |
+| [Blocking: quoted function names, `IS (?)`, a quoted `PRAGMA` and `COLLATE 'NOCASE'` escape the matcher](https://github.com/immediately-run/baton/pull/371#discussion_r4660605763) | Fixed in `4b2a61d5`, with positive and negative regressions. |
+| [Blocking: a keyword split across a template interpolation (`INSERT ${…"OR IGNORE"…}`) is not seen](https://github.com/immediately-run/baton/pull/371#discussion_r4660605765) | Fixed in `4b2a61d5`: static template fragments and branches are composed before matching. |
+| [Blocking: no test upgrades a populated database through the tie-order backfill, and the backfill bumps view versions](https://github.com/immediately-run/baton/pull/371#discussion_r4660605769) | Fixed in `4b2a61d5`: both hosts upgrade legacy rows with noncontiguous rowids, and the migration lifts the two update triggers inside its transaction. |
+| [Should-fix: `rowsWritten` is tested only where the adapters agree](https://github.com/immediately-run/baton/pull/371#discussion_r4660605773) | Fixed in `4b2a61d5`: an indexed fixture asserts the host-specific counts. |
+| The full suite's S-BTN-41 failure, `released:lease-lost` (review body) | Fixed in `4b2a61d5`: the short-wait fixture advances its clocks while renewing the lease. |

@@ -1,0 +1,20 @@
+---
+title: B-279 review round 1
+description: Findings and disposition for the first review of the shared scenario fixtures and the raw-SQL source gate.
+---
+
+Reviewed [Baton #372](https://github.com/immediately-run/baton/pull/372) at `91734580`
+([review](https://github.com/immediately-run/baton/pull/372#pullrequestreview-6015243744)). The verdict was changes: the fixture migration and
+S-BTN-229's injected clock passed the focused run (46 tests), but the source gate missed valid
+writes and let a PR raise its own allowance.
+
+A fix leg answered every thread at `6cd35500`, and round 2 confirmed each closed. The PR was
+merged on 2026-11-26.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: the scanner misses an aliased UPDATE and a write with a SQL comment between tokens](https://github.com/immediately-run/baton/pull/372#discussion_r4660684721) | Fixed in `6cd35500`. |
+| [Blocking: the allowlist is compared only with itself, so a PR can raise its own budget](https://github.com/immediately-run/baton/pull/372#discussion_r4660684732) | Fixed in `6cd35500` (the ratchet compares against the PR's base commit). |
+| [Should-fix: S-BTN-189's fixture roots are never disposed](https://github.com/immediately-run/baton/pull/372#discussion_r4660684739) | Fixed in `6cd35500`. |
+| [Should-fix: S-BTN-226 disposes only the `work/` subdirectory](https://github.com/immediately-run/baton/pull/372#discussion_r4660684745) | Fixed in `6cd35500`. |
+| [Should-fix: S-BTN-204, -219 and -222 still build their own runner instead of the rig](https://github.com/immediately-run/baton/pull/372#discussion_r4660684750) | Fixed in `6cd35500`. |

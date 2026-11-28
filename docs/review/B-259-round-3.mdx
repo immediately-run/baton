@@ -1,0 +1,15 @@
+---
+title: B-259 review round 3
+description: Findings and disposition for the third review of archiving events before retention deletes them, which found round 2's blocker still open; fixed before merge.
+---
+
+Reviewed [Baton #357](https://github.com/immediately-run/baton/pull/357) at `fc4a033b`
+([review](https://github.com/immediately-run/baton/pull/357#pullrequestreview-6017092480)). The
+verdict was changes: the head had not moved since round 2, and the reviewer reproduced the
+overlapping-alarm finding on the local host with SQLite and ran the focused suites and typecheck.
+
+The PR was merged on 2026-11-25. This round's finding was fixed on the branch before merge.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking (still open): the early return skips non-event retention while an archive write is pending](https://github.com/immediately-run/baton/pull/357#discussion_r4662245729) | Fixed in `3c52792d` (the same finding as round 2's). |

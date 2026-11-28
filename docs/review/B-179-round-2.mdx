@@ -1,0 +1,23 @@
+---
+title: B-179 review round 2
+description: Findings and disposition for the second review of the spec split into section files, posted as the PR merged and fixed in its follow-up.
+---
+
+Reviewed [Baton #173](https://github.com/immediately-run/baton/pull/173) at `cdc73ff5`
+([review](https://github.com/immediately-run/baton/pull/173#pullrequestreview-5763816988)). No
+verdict comment was posted; the reviewer found two should-fix and two nits and nothing blocking.
+It re-ran the move proof (`--prove 616e5d8 05b4945`, identical), `check:spec`, `check:wiki`,
+`check:tickets` and the spec-files and check-spec tests, matched the index's 170 rules, 155
+scenarios and 145 gates against the parts, and checked each of round one's replies.
+
+The PR was merged on 2026-11-04, on the owner's word with no blocking finding open, as this
+round posted. Its four findings were fixed in the follow-up
+[Baton #175](https://github.com/immediately-run/baton/pull/175), merged the same day without a
+review of its own.
+
+| Finding | Disposition |
+|---|---|
+| [Should-fix: round one's gate-title fix copies each gate's whole statement into the index](https://github.com/immediately-run/baton/pull/173#discussion_r4464083207) | Fixed in `06515129` (#175): gates are listed by id and file only. |
+| [Should-fix: the order rule leaves the front and the appendices unchecked](https://github.com/immediately-run/baton/pull/173#discussion_r4464083676) | Fixed in `06515129` (#175): the front holds no numbered section, and each appendix is pinned to its prefix and heading. |
+| [Nit: the directory-versus-file `spec:impact` equality can never fail](https://github.com/immediately-run/baton/pull/173#discussion_r4464084157) | Fixed in `06515129` (#175): the test asserts the units' `file:line` instead. |
+| [Nit: a mistyped `--prove` flag rewrites the index and reports success](https://github.com/immediately-run/baton/pull/173#discussion_r4464084479) | Fixed in `06515129` (#175): any other argument prints usage and exits 2. |

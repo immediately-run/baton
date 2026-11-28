@@ -1,0 +1,62 @@
+---
+title: "B-278 — Keep PostgreSQL possible: a dialect lint, a Store conformance test, and no new SQLite-only SQL"
+id: B-278
+project: baton
+status: done
+updated: 2026-11-27
+tags:
+  - roadmap-item
+description: "A lint for SQLite-only constructs behind a shrink-only allowlist, a Store conformance test on both hosts, RETURNING id for last_insert_rowid, Sequences.next read inside its transaction, one Db helper"
+topics:
+  - baton
+owns: {}
+prs: [https://github.com/immediately-run/baton/pull/371]
+depends_on: []
+---
+
+**What:** replacing SQLite with PostgreSQL is feasible for one instance and large: the `Store`
+port is synchronous (about 2,000 call sites) and 894 SQL statements sit in 29 core files. Nothing
+stops that cost growing. Keep the move possible without making it.
+
+From the architecture review of 2026-11-19 (`docs/review/architecture-review-2026-11-19.mdx`, on the branch `review/architecture-2026-11-19` until it lands).
+
+### What to build
+
+1. A dialect lint in `npm test` that fails on new uses of `last_insert_rowid`, `changes()`,
+   `rowid`, `INSERT OR`, scalar `MAX(a, b)`, `IS ?`, `COLLATE NOCASE` and `PRAGMA`, beyond an
+   allowlist that may only shrink.
+2. A `Store` conformance test run on both hosts: nested rollback, `one()`, `rowsWritten`,
+   integers above 2^53, unique-violation detection, a write followed by a throw outside a
+   transaction.
+3. Replace the six `last_insert_rowid()` reads with `RETURNING id`; give the five `rowid`
+   orderings a column; read the stored number in `Sequences.next` inside its transaction (it is
+   read outside it today).
+4. One `Db` helper replacing the 23 private `rows` wrappers; then a repository per aggregate
+   for the four files that hold 501 of the 894 statements.
+5. Record on the architecture page whether the synchronous store and the single writer are
+   permanent decisions. This is the owner's sentence to write; the leg proposes it.
+
+Several instances on one shared database is out of scope: correctness rests on a single writer.
+
+**Done when:** steps 1 to 3 are in `npm test` and green on both hosts; step 4 may be a second
+pull request.
+
+### Trust
+
+No new input. The SQL changes keep every value bound as a parameter; no statement is built from
+a runner- or owner-supplied string.
+
+### Invariants
+
+- [BATON_SPEC §4.3](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) ([R-BTN-199](../../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3)): Baton hands out every identifier; `Sequences.next` never gives one
+  number twice, on either host.
+- [BATON_SPEC §2.1](../../spec/BATON_SPEC/02-deployments.md#sec-2-1) ([R-BTN-55](../../spec/BATON_SPEC/02-deployments.md#sec-2-1)): one core, both hosts; the conformance test is what makes "unchanged"
+  checkable.
+- Migrations are append-only: a new column is a new numbered file.
+- A heartbeat's writes stay in one `store.transaction`.
+
+## Status
+
+_filed 2026-11-19._
+
+_2026-11-27: closed in the 2026-11-27 sweep of tickets Baton held at merged with their files still open: #371 merged and the ticket file was never closed; review rounds archived in docs/review/B-278-round-*.mdx; findings open at merge carried by B-386, https://github.com/immediately-run/baton/pull/371._

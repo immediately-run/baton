@@ -1,0 +1,62 @@
+---
+id: B-341
+status: done
+topics: [security, policy]
+owns: []
+prs: [https://github.com/immediately-run/baton/pull/454]
+title: "B-341 — The break-glass checks and the instance human-key floor, built on B-136's model (re-filed from #338)"
+depends_on: []
+tags: [roadmap-item]
+project: baton
+repos: [baton]
+description: Re-filed from
+updated: 2026-11-27
+---
+
+**Brief:** the owner, 2026-11-26 (in a Claude Code session on bering), on #338 (B-294): "Close, port onto main" — close #338 and re-file only its additions as a ticket built on #331's (B-136's) model of what meets `hardware`. This ticket is that re-filing; it supersedes B-294.
+
+**Spec:** the rules B-294 cites (the human-key minimum, `human_key`, break-glass lines, approver lists), as they read on main after B-136 (#331) and B-293.
+
+**Depends on:** B-136 (merged, #331).
+
+### Why
+
+B-136 (#331) made a key that carries no hardware attestation fail `hardware`. #338 (B-294) built a second model of the same minimum alongside it, and the two conflicted in 26 places across `src/core/policy.ts` and `src/core/admin.ts`. What #338 adds beyond #331 is still wanted; its own model of the minimum is not.
+
+### What to build, on #331's model
+
+1. **An instance floor.** The effective minimum is the stricter of the repository's `human_key` and a host setting `BATON_HUMAN_KEY` (default `any`; an invalid value is refused at start). It is a deployment-time setting, not an API.
+2. **Break-glass lines obey the effective minimum** on policy changes, floor removal, ownership changes and signed person answers. A configured `BATON_HUMAN_KEYS` line that does not meet the minimum satisfies nothing there. It never counts as a live owner when an approver list is checked (`listSatisfiable` stays as main has it).
+3. **Recovery at `any` keeps working.** On the policy, floor and ownership routes only, a verified configured line is admitted so that the route's own approver check decides. No other owner route admits it.
+4. **Tests on both hosts**, reusing #338's cases where they still apply: S-BTN-192 (approver lists), S-BTN-190 (floors), S-BTN-67 (person answers).
+
+#338's code (branch `claude/B-294-break-glass-human-key-floor`) is a reference, not a base.
+
+### Trust
+
+- **New input:** the host setting `BATON_HUMAN_KEY`. Only the deployment's operator sets it; it is read at start and an invalid value is refused. Nothing a ticket, a branch or a leg writes reaches it.
+- Break-glass lines (`BATON_HUMAN_KEYS`) stay host configuration as today. This ticket narrows what they can do and adds no way to write them.
+
+### Invariants
+
+- A minimum never loosens: the effective `human_key` is the stricter of the repository's and the instance's.
+- A configured line never counts as a live owner in an approver list (`listSatisfiable` as main has it).
+- Only the policy, floor and ownership routes admit a verified configured line, and their own approver checks still decide.
+
+### For the owner, before merge
+
+#338 asked for this, and it still holds: inventory the repositories whose effective minimum is `hardware`, and the SSH key types configured for them, without sharing key material. Under this ticket, none of those lines can recover a `hardware` human gate. Confirm that no repository relies on that recovery path.
+
+### Exit criteria
+
+- [ ] The instance floor and the break-glass checks above, on #331's model, with their scenarios passing on both hosts.
+- [ ] `npm test`, `npm run typecheck` and `npm run check:spec` green.
+- [ ] The owner has confirmed the recovery inventory; merged under the review gate.
+
+## Status
+
+_filed 2026-11-26._ Re-filed from #338 (B-294), closed at the owner's word the same day.
+
+_2026-11-26: available, https://github.com/immediately-run/baton/pull/454._
+
+_2026-11-27: closed in the 2026-11-27 sweep of tickets Baton held at merged with their files still open: #454 merged and the ticket file was never closed; the PR had no review rounds to archive, https://github.com/immediately-run/baton/pull/454._

@@ -1,0 +1,25 @@
+---
+title: B-108 review round 1
+description: Findings and disposition for the first review of the stub concluding an agent that will not exit, merged with two blocking and two should-fix findings open.
+---
+
+Reviewed [Baton #228](https://github.com/immediately-run/baton/pull/228) at `1051cc7c`
+([review](https://github.com/immediately-run/baton/pull/228#pullrequestreview-5878774556)). The
+review's verdict was changes: two blind passes, re-verified by hand, ran the new unit and
+integration tests twice and found that the harness-store signal can read quiet while the agent
+works, so the idle bound can kill a working agent before the ceiling. No `baton:verdict` comment
+was posted for this review.
+
+The PR was merged on 2026-11-12 (by `neumark`) at the reviewed head, with this round's findings
+open. No fix leg ran after this round. The open findings are carried by B-375.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: `newestWrite` reads only the first 512 entries of a directory](https://github.com/immediately-run/baton/pull/228#discussion_r4553735347), so a live claude-code session file past the cut is invisible and the agent is concluded idle | Open on `main` (`src/runner/log.ts` still stops at 512 entries in `readdirSync` order). Carried by B-375. |
+| [Blocking: claude-code's project key is not the slash-to-dash path](https://github.com/immediately-run/baton/pull/228#discussion_r4553735357): it replaces every non-alphanumeric character and hashes long paths, so the watched directory may never exist | Open on `main` (`src/runner/harness.ts` still keys by `split('/').join('-')`). Carried by B-375. |
+| [Should-fix: the example wrapper writes its log under the wrong name](https://github.com/immediately-run/baton/pull/228#discussion_r4553735366): `.baton/leg-wrapper.example` reads `$2`/`$3`, which are the agent's own words for a multi-word command, so the wrapper-log signal never fires | Open on `main` (the example still sets `ticket="$2"`, `leg="$3"`). Carried by B-375. |
+| [Should-fix: a concluded agent's in-flight stdout is dropped](https://github.com/immediately-run/baton/pull/228#discussion_r4553735377): `finishWatch` kills and resolves at once, truncating the tail where an ask leg's answer sits | Open on `main` (`src/defaults/stub-runtime.ts` still resolves inside `finishWatch`, and the `close` handler returns early on a conclusion). Carried by B-375. |
+| [Nit: the conclusion suffix is logged only on the advance trail](https://github.com/immediately-run/baton/pull/228#discussion_r4553735384) | Not carried (nit). |
+| [Nit: `ageWords` never prints 1m](https://github.com/immediately-run/baton/pull/228#discussion_r4553735396) | Not carried (nit). |
+| [Nit: `ageWords` has no direct test](https://github.com/immediately-run/baton/pull/228#discussion_r4553735407) | Not carried (nit). |
+| [Nit: the completion-rule sentence is one long line with mixed apostrophes in 32 headers](https://github.com/immediately-run/baton/pull/228#discussion_r4553735423) | Not carried (nit). |

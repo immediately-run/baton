@@ -1,0 +1,16 @@
+---
+title: B-259 review round 4
+description: Findings and disposition for the fourth review of archiving events before retention deletes them, an approval with one should-fix that main's executor change closed.
+---
+
+Reviewed [Baton #357](https://github.com/immediately-run/baton/pull/357) at `1707752c`
+([review](https://github.com/immediately-run/baton/pull/357#pullrequestreview-6018252915)). The
+verdict was approve: the reviewer confirmed the overlap fix (a second local alarm prunes an
+expired snapshot without starting another export), ran the focused suites, typecheck and diff
+checks, and left one should-fix on the executor change the branch had added.
+
+The PR was merged on 2026-11-25. No finding is open.
+
+| Finding | Disposition |
+|---|---|
+| [Should-fix: a failed spawn now reports a negative libuv code as its exit status](https://github.com/immediately-run/baton/pull/357#discussion_r4663165185) | Fixed in `29033b19`: the merge of `main` took main's executor drain, which reports `status: null` when the spawn failed (`src/runner/executor.ts`). |

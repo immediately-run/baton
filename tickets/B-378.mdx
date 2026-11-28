@@ -1,0 +1,49 @@
+---
+id: B-378
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-378 — link-spec-refs links Spec lines that name no spec, and both ids of a slash-joined pair
+depends_on: []
+order: 93
+tags: [roadmap-item]
+project: baton
+description: "Two defects left open when B-180 merged: Spec lines citing BATON_SPEC ids without naming it are skipped silently, and the second id of an X/Y pair is never linked or reported."
+repos: [baton]
+---
+
+**Found by:** the review of B-180's PR, round 4 ([`docs/review/B-180-round-4.mdx`](../docs/review/B-180-round-4.mdx)). #176 was merged on 2026-11-04 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** none (the findings are in `scripts/link-spec-refs.mjs` and the live tickets' `**Spec:**` lines).
+
+**Depends on:** none.
+
+### What is open
+
+1. A `**Spec:**` paragraph that cites BATON_SPEC by rule id or `§` number without naming the spec never opens a run in `scripts/link-spec-refs.mjs`: the `!active` check comes before the unmapped check, so those citations are neither linked nor reported, and `--check` stays green. The review counted 38 live tickets with such a line whose ids the index lists, for example `tickets/B-101.mdx` (`**Spec:** §5.8 R-BTN-131 …`) and `tickets/B-137.mdx` ([thread](https://github.com/immediately-run/baton/pull/176#discussion_r4469296873)).
+2. `TOKEN`'s lookbehind treats `/` as a path boundary, so in a slash-joined pair like `R-BTN-99/R-BTN-100` only the first id is linked, and the second is neither linked nor reported; `tickets/R3-1272.mdx` still reads `[R-BTN-99](…)/R-BTN-100` ([thread](https://github.com/immediately-run/baton/pull/176#discussion_r4469296901)).
+
+### What to build
+
+1. Start the run active when the paragraph is a `**Spec:**` line (`specAt != null`); another spec's name, plain or in a code span, still ends it, so other specs' citations stay unlinked. Re-run the script over the live tickets and docs.
+2. Let an id directly after `/` that follows another id match, so both members of a pair are linked or reported. Re-run the script.
+
+### Exit criteria
+
+- `scripts/link-spec-refs.test.mjs` covers a `**Spec:**` line with no spec name (B-101's line as it stands) and a slash-joined pair (R3-1272's), and a second run is a no-op.
+- `node scripts/link-spec-refs.mjs --check` reports nothing to link, and every citation it leaves plain is reported as unmapped.
+- `npm run check:wiki`, `npm test` and `npm run typecheck` green.
+
+### Trust
+
+The script rewrites ticket and docs prose; it must change only citations into links, never wording, frontmatter or code.
+
+### Invariants
+
+- Another spec's citations are never linked to BATON_SPEC.
+- `tickets/archive/` and `docs/review/` are not rewritten.
+
+## Status
+
+_filed 2026-11-27._

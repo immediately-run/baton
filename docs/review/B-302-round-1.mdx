@@ -1,0 +1,23 @@
+---
+title: B-302 review round 1
+description: Findings and disposition for the first review of the owner-state policy preservation and the section 4 alignment.
+---
+
+Reviewed [Baton #340](https://github.com/immediately-run/baton/pull/340) at `5201f4ca`
+([review](https://github.com/immediately-run/baton/pull/340#pullrequestreview-6010789715)). The verdict was changes: the protected-policy round
+trip passed on Node and Cloudflare, but owner-state moves could still strand tickets or restore
+inconsistent state, and the held-post wording contradicted an existing test; 98 focused tests,
+`check:spec`, `check:wiki` and the whitespace check passed.
+
+A fix leg answered every thread at `7210845f`, and round 2 reviewed the result. The PR was merged
+on 2026-11-25.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: restoring only `ticket_stations` leaves the ticket unclaimable after a stale first post](https://github.com/immediately-run/baton/pull/340#discussion_r4657027519) | Fixed in `7210845f` (outgoing legs rebuilt from the course in force). |
+| [Blocking: a second move before the first board post loses the Baton-owned position](https://github.com/immediately-run/baton/pull/340#discussion_r4657027521) | Fixed in `7210845f` (a sealed export carries pending ticket-scoped rows). |
+| [Blocking: import does not check that the imported policy meets its floors (R-BTN-189)](https://github.com/immediately-run/baton/pull/340#discussion_r4657027524) | Fixed in `7210845f`; merge `53e8c91a` kept the check through `guaranteesOf(policy)` after B-136. |
+| [Blocking: JSON null text for `session_hosts` restores as a value, not the reset](https://github.com/immediately-run/baton/pull/340#discussion_r4657027526) | Fixed in `7210845f`. |
+| [Blocking: R-BTN-11's SHA restriction contradicts the accepted-line behaviour](https://github.com/immediately-run/baton/pull/340#discussion_r4657027529) | Fixed in `7210845f` (R-BTN-11 and S-BTN-13 describe the accepted line). |
+| [Should-fix: the role check ignores the destination's administrator fingerprints](https://github.com/immediately-run/baton/pull/340#discussion_r4657027537) | Fixed in `7210845f`. |
+| [Should-fix: R-BTN-88 does not say that `leg_run_inputs` cannot be restored](https://github.com/immediately-run/baton/pull/340#discussion_r4657027539) | Fixed in `7210845f` (documented in R-BTN-88). |

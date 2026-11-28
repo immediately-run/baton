@@ -1,0 +1,19 @@
+---
+title: B-60 review round 1
+description: Findings and disposition for the first review of the leg-deadline reap and its fixed fence, fixed or answered before the next round.
+---
+
+Reviewed [Baton #307](https://github.com/immediately-run/baton/pull/307) at `d571a9b2`
+([review](https://github.com/immediately-run/baton/pull/307#pullrequestreview-6004340804), [verdict comment](https://github.com/immediately-run/baton/pull/307#issuecomment-7060464658)). The
+verdict was changes: the reviewer reproduced a delivered timeout reaping the successor leg and
+found three cleanup and verification gaps; S-BTN-52 passed all 14 tests across both hosts, and
+`model:quick`, `model:links`, typecheck, `check:spec` and `check:wiki` passed.
+
+Three findings were fixed in `5d2db356` and the fourth was answered; round two reviewed the fixes.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a delivered timeout can reap the next leg, since the advance expires only pending timeout releases](https://github.com/immediately-run/baton/pull/307#discussion_r4651749596) | Fixed in `5d2db356`: the server refuses the advance while a delivered `leg-timeout` stands, and S-BTN-52 and the model cover it. |
+| [Should-fix: the reap leaves other delivered releases for the claim eligible, which can stop a replacement claim](https://github.com/immediately-run/baton/pull/307#discussion_r4651749599) | Fixed in `5d2db356`: the reap expires all pending and delivered releases for that runner and ticket. |
+| [Should-fix: replay accepts any change to a non-null deadline as a re-arm](https://github.com/immediately-run/baton/pull/307#discussion_r4651749600) | Fixed in `5d2db356`: replay checks the heartbeat instant plus 40 minutes exactly. |
+| [Should-fix: the PR carries no `npm run model:pr` report for the model change](https://github.com/immediately-run/baton/pull/307#discussion_r4651749602) | Answered: run on `5d2db356`, but the all-scenario replay did not finish within the 20-minute limit; left out under R-BTN-68's advisory rule. |

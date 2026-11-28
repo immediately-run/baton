@@ -1,0 +1,51 @@
+---
+id: B-387
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: B-387 — The scenario SQL gate sees writes split across literals or behind a BOM, and its recovery step works in a shallow checkout
+depends_on: []
+order: 102
+tags: [roadmap-item]
+project: baton
+description: "Three open findings from B-279's second review: the scenario SQL scanner misses writes split across literals or behind a byte-order mark, and its recovery message fails in a depth-one checkout."
+repos: [baton]
+---
+
+**Found by:** the review of B-279's PR, round 2 ([`docs/review/B-279-round-2.mdx`](../docs/review/B-279-round-2.mdx)). #372 was merged on 2026-11-26 with these findings open. This is a defect report, not an owner brief.
+
+**Spec:** none (test-only findings).
+
+**Depends on:** none.
+
+### What is open
+
+1. The raw-SQL source gate scans each literal alone and replaces every template substitution with a placeholder, so `rows('UPDATE t ' + 'SET n=1')` and a template whose substitution is the constant `"UPDATE"` both change a row in SQLite while `scenarioSource` (`test/lib/scenarioSource.ts`) reports no write ([thread](https://github.com/immediately-run/baton/pull/372#discussion_r4660825862)).
+2. The scanner's identifier token spans `\u0080-￿`, so a literal starting with U+FEFF swallows the byte-order mark into the `UPDATE` token; SQLite ignores the mark and runs the write, and the gate reports nothing ([thread](https://github.com/immediately-run/baton/pull/372#discussion_r4660825865)).
+3. The gate's recovery message (`test/lib/scenarioSqlBudget.ts`) tells the reader to run `git fetch origin main`, which in a depth-one, single-branch checkout fills `FETCH_HEAD` but not `refs/remotes/origin/main`, so the gate fails again ([thread](https://github.com/immediately-run/baton/pull/372#discussion_r4660825870)).
+
+### What to build
+
+1. Fold statically computable SQL strings (adjacent literal concatenation, constant template substitutions) before scanning.
+2. Treat U+FEFF (and other characters SQLite ignores at a token boundary) as a boundary, not part of an identifier.
+3. Fetch the base into the ref the gate reads (or use the fetched commit directly), and make the message say a command that works in that checkout.
+
+### Exit criteria
+
+- `test/unit/boundary-host.test.ts` gains regressions for the concatenated literal, the constant template substitution and the leading U+FEFF, each reported as a write.
+- A depth-one, single-branch checkout of a PR branch passes the SQL budget check after the documented recovery step.
+- `npm test` and `npm run typecheck` green.
+
+### Trust
+
+No new input: test code only.
+
+### Invariants
+
+- The gate's allowlist may only shrink, compared against the PR's base.
+- Comments and regular expressions that describe a query still do not count as writes.
+
+## Status
+
+_filed 2026-11-27._

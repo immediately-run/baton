@@ -1,0 +1,20 @@
+---
+title: B-180 review round 4
+description: Findings and disposition for the fourth review of the spec bundle and its section links, merged with a blocking finding open.
+---
+
+Reviewed [Baton #176](https://github.com/immediately-run/baton/pull/176) at `7848b5c9` ([review](https://github.com/immediately-run/baton/pull/176#pullrequestreview-5770666458)), the
+create-pr course's review leg. No verdict comment was posted; two blind reviewers and the
+orchestrator re-ran the checks and every link, confirmed the earlier rounds' fixes, and found one
+blocking finding, two should-fix and two nits.
+
+The PR was merged on 2026-11-04 at the same head, with this round's findings open. No fix leg ran
+after this round. The open findings are carried by B-378.
+
+| Finding | Disposition |
+|---|---|
+| [Blocking: a `**Spec:**` paragraph that names no spec never opens a run, so its index-listed citations are neither linked nor reported](https://github.com/immediately-run/baton/pull/176#discussion_r4469296873) | Open on `main` (`tickets/B-101.mdx` and B-137 still cite plain ids, and `--check` passes). Carried by B-378. |
+| [Should-fix: the second id of a slash-joined pair is never linked or reported](https://github.com/immediately-run/baton/pull/176#discussion_r4469296901) | Open on `main` (`tickets/R3-1272.mdx` still reads `…/R-BTN-100`). Carried by B-378. |
+| [Should-fix: the PR body says only R3-1272 of the four failing tickets changed, but all four `**Spec:**` lines did](https://github.com/immediately-run/baton/pull/176#discussion_r4469296919) | Not carried: a claim in the merged PR's body; the files' substance was confirmed unchanged. |
+| [Nit: a no-op `.replace(/^spec/, 'spec')` in the test](https://github.com/immediately-run/baton/pull/176#discussion_r4469296934) | Open on `main`. Not carried (nit). |
+| [Nit: the strip helper is imported by three readers, not the ticket's four](https://github.com/immediately-run/baton/pull/176#discussion_r4469296954) | Answered: `check-model-links.mjs` reads no spec file. Not carried. |
