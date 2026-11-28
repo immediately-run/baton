@@ -11,9 +11,10 @@
 // listed by `blocked?on=decision:baton:*`; a posted `baton:x` is dropped; and `baton owner resolve
 // … retry` clears one and unblocks the ticket.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Git, adminSession, course, cutover, keyCall, observe, placed, rows, sessionCall, setAdminKeys, setClock, tick } from '../helpers';
+import { Git, adminSession, course, cutover, keyCall, observe, placed, rows, setAdminKeys, setClock, tick } from '../helpers';
 import { makeKey, type TestKey } from '../lib/sshKeys';
 import { grantedRunner, signed } from '../lib/fleet';
+import { postSession } from '../lib/needsYouFixture';
 import roadmapPr from '../fixtures/courses/roadmap-pr/course.json';
 
 const T0 = Date.parse('2026-10-16T12:00:00Z');
@@ -51,6 +52,98 @@ beforeEach(async () => {
 });
 
 describe('S-BTN-47 positions, course changes and the dead-ticket queue', () => {
+  async function fail(w: Awaited<ReturnType<typeof grantedRunner>>, id: string, leg: string, request: string, kind = 'transient') {
+    const c = await w.call('/v1/runner/claim', { request_id: request, ticket_id: `docs:${id}` });
+    expect(c.status, JSON.stringify(c.json)).toBe(200);
+    const path = `/v1/runner/claims/${c.json.claim_id}`;
+    expect((await w.call(`${path}/advance`, { leg })).status).toBe(200);
+    expect((await w.call(`${path}/end`, { end_reason: `released:cannot-finish:${kind}` })).status).toBe(200);
+  }
+
+  it('an exhausted leg retries once at the configured age and holds on its next failure', async () => {
+    expect((await keyCall(owner, '/v1/owner/docs/settings', { retry: { backoff_ms: [MIN], max_failed: 1 }, exhausted_retry_s: 120 }, 'PUT')).status).toBe(200);
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
+    await fail(w, 'R', 'implement', 'initial-failure');
+    expect((await git.refresh()).status).toBe(200);
+    await setClock(T0 + 2 * MIN - 1);
+    await tick();
+    expect(await rows(`SELECT hold FROM ticket_overrides WHERE ticket_id = 'docs:R'`)).toEqual([{ hold: 1 }]);
+    await setClock(T0 + 2 * MIN);
+    await tick();
+    expect(await rows(`SELECT hold FROM ticket_overrides WHERE ticket_id = 'docs:R'`)).toEqual([{ hold: 0 }]);
+    expect(await decisions('R')).toHaveLength(1);
+    await fail(w, 'R', 'implement', 'automatic-retry');
+    await setClock(T0 + 24 * H);
+    await tick();
+    expect(await rows(`SELECT hold, hold_reason FROM ticket_overrides WHERE ticket_id = 'docs:R'`)).toEqual([{ hold: 1, hold_reason: 'attempts-exhausted' }]);
+    expect(await decisions('R')).toHaveLength(1);
+    expect(await rows(`SELECT seq FROM events WHERE json_extract(detail_json, '$.reason') = 'exhausted-retry'`)).toHaveLength(1);
+  });
+
+  it('S-BTN-47: a source closure or end station settles Baton holds but never an owner hold', async () => {
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
+    await fail(w, 'R', 'implement', 'fail-closed', 'spec');
+    await fail(w, 'A', 'review', 'fail-end', 'spec');
+    expect((await keyCall(owner, '/v1/owner/docs/overrides/J', { hold: true })).status).toBe(200);
+    git.close('R', 'withdrawn');
+    git.close('J', 'done');
+    git.place('A', placed('merged', [...REVIEWED, ['merge', 'merged']], []));
+    expect((await git.post()).status).toBe(200);
+    expect(await rows(`SELECT ticket_id, hold, hold_reason FROM ticket_overrides ORDER BY ticket_id`)).toEqual([
+      { ticket_id: 'docs:A', hold: 0, hold_reason: null },
+      { ticket_id: 'docs:J', hold: 1, hold_reason: 'owner' },
+      { ticket_id: 'docs:R', hold: 0, hold_reason: null },
+    ]);
+    expect(await decisions('A')).toEqual([]);
+    expect(await decisions('R')).toEqual([]);
+    expect(await rows(`SELECT ticket_id FROM events WHERE json_extract(detail_json, '$.reason') = 'snapshot-closed'
+      AND json_extract(detail_json, '$.sha') IS NOT NULL AND json_extract(detail_json, '$.observation') > 0 ORDER BY ticket_id`)).toEqual([{ ticket_id: 'docs:A' }, { ticket_id: 'docs:R' }]);
+  });
+
+  it('S-BTN-47: dry run lists the matching decisions and one owner request answers the batch', async () => {
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
+    await fail(w, 'R', 'implement', 'fail-batch-r', 'spec');
+    await setClock(T0 + MIN);
+    await fail(w, 'A', 'review', 'fail-batch-a', 'spec');
+    const path = '/v1/owner/docs/resolve';
+    const body = { decision: 'baton:retries', answer: 'retry' };
+    expect((await keyCall(cli, path, body)).status).toBeGreaterThanOrEqual(400);
+    const preview = await keyCall(owner, path, { ...body, station: 'pr-open', since: new Date(T0 + MIN).toISOString(), dry_run: true });
+    expect(preview.status).toBe(200);
+    expect(preview.json.tickets).toEqual([{ ticket_id: 'docs:A', station: 'pr-open', opened_at: T0 + MIN }]);
+    expect(await decisions('A')).toHaveLength(1);
+    expect(await decisions('R')).toHaveLength(1);
+    const batch = await keyCall(owner, path, body);
+    expect(batch.status).toBe(200);
+    expect(batch.json.tickets.map((t: { ticket_id: string }) => t.ticket_id)).toEqual(['docs:A', 'docs:R']);
+    expect(await decisions('A')).toEqual([]);
+    expect(await decisions('R')).toEqual([]);
+    expect(await rows(`SELECT seq FROM events WHERE json_extract(detail_json, '$.act') = 'resolve-all'`)).toHaveLength(1);
+  });
+
+  it('previews and confirms a dashboard batch without allowing credentials across key routes', async () => {
+    const w = await grantedRunner(owner, 'docs', 'w1', ['agent-venue']);
+    await fail(w, 'R', 'implement', 'fail-dashboard-batch', 'spec');
+    const cookie = await adminSession(admin);
+    const ui = '/v1/ui/repositories/docs/resolve';
+    const adminPath = '/v1/admin/repositories/docs/resolve';
+    const ownerPath = '/v1/owner/docs/resolve';
+    const body = { decision: 'baton:retries', answer: 'park' };
+    expect((await keyCall(admin, ownerPath, body)).json.code).toBe('forbidden');
+    expect((await keyCall(owner, adminPath, body)).json.code).toBe('forbidden');
+    const adminPreview = await keyCall(admin, adminPath, { ...body, dry_run: true });
+    expect(adminPreview.status).toBe(200);
+    expect(adminPreview.json.tickets).toHaveLength(1);
+    const preview = await postSession(cookie, ui, { ...body, dry_run: true });
+    expect(preview.status).toBe(200);
+    expect(preview.json.tickets).toEqual(adminPreview.json.tickets);
+    expect((await postSession(cookie, ui, body)).json.code).toBe('confirm-required');
+    expect(await decisions('R')).toHaveLength(1);
+    expect((await postSession(cookie, ui, { ...body, confirm: true })).status).toBe(200);
+    expect(await decisions('R')).toEqual([]);
+    expect(await rows(`SELECT hold FROM ticket_overrides WHERE ticket_id = 'docs:R'`)).toEqual([{ hold: 1 }]);
+  });
+
   it('work git shows without a marker is posted inferred and recorded as git moving the ticket', async () => {
     await setClock(T0 + MIN);
     git.place('A', placed('reviewed', REVIEWED, [['merge', 'ready']], { next_source: 'inferred' }));
@@ -233,4 +326,3 @@ describe('S-BTN-47 positions, course changes and the dead-ticket queue', () => {
     expect((o.json as unknown as { legs: unknown[] }).legs).toEqual([]); // no leg here passed an evidence pointer
   });
 });
-

@@ -79,6 +79,7 @@
 //   baton owner -i KEY courier revoke REPO FINGERPRINT
 //   baton owner -i KEY resolve REPO TICKET baton:retries|baton:stalled retry|park   (R-BTN-78)
 //   baton owner -i KEY resolve REPO TICKET DECISION OPTION   — a sync-posted decision's answer (B-110: review-rounds-3 round)
+//   baton owner -i KEY resolve REPO --decision baton:retries --all [--station S] [--since ISO-UTC] [--dry-run] retry|park
 //   baton admin -i KEY repos                                         (B-90: the registry — one signed request, one JSON answer)
 //   baton owner -i KEY grants REPO                    (B-90: the repository's owners, grants and settings, and the bars in force)
 //   baton board -i KEY REPO                    (B-90: the dashboard's view of one repository — its courses, head, mode, ready tickets)
@@ -615,7 +616,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       } };
     }
     if (cmd === 'settings') {
-      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars', 'require-signed-control', 'no-require-signed-control'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'code-repos', 'forge-ids', 'pushers'], 1);
+      const { flags, positional, groups } = parseArgs(rest, ['no-required-bars', 'require-signed-control', 'no-require-signed-control'], ['required-bar', 'course', 'except', 'tag-prefix', 'retry', 'max-failed', 'exhausted-retry', 'transcript-repos', 'unblocked-workflow', 'remind-after', 'code-repos', 'forge-ids', 'pushers'], 1);
       const body = {};
       if (flags['no-required-bars']) {
         if (groups.length) throw new Error('--no-required-bars clears them: name no --required-bar beside it');
@@ -633,6 +634,7 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       else if (flags['unblocked-workflow']) body.unblocked_trigger = { kind: 'github-app', workflow: flags['unblocked-workflow'] };
       // R-BTN-80: how long a sent notice waits for its decision before it is queued again, in seconds.
       if (flags['remind-after']) body.remind_after = Math.round(duration(flags['remind-after']) / 1000);
+      if (flags['exhausted-retry']) body.exhausted_retry_s = duration(flags['exhausted-retry']) / 1000;
       // B-127 (R-BTN-66 as amended): control inputs count only at owner-signed commits. On
       // tightens — any owner may; off is a loosening an `approvers.policy` approver signs for.
       if (flags['require-signed-control'] && flags['no-require-signed-control']) throw new Error('--require-signed-control and --no-require-signed-control name one state, not both');
@@ -677,7 +679,17 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
     if (cmd === 'resolve') {
       // R-BTN-78: an owner's answer to one of Baton's own decisions on a ticket. B-121: with a
       // home in force the repository position may be omitted, three positionals remaining.
-      const { positional } = parseArgs(rest, [], [], 4);
+      const { flags, positional } = parseArgs(rest, ['all', 'dry-run', 'json'], ['decision', 'station', 'since'], rest.includes('--all') ? 2 : 4);
+      if (flags.all) {
+        const [repo, answer] = home?.repository != null && positional.length === 1 ? [home.repository, ...positional] : positional;
+        if (flags.decision !== 'baton:retries') throw new Error('--all requires --decision baton:retries');
+        if (answer !== 'retry' && answer !== 'park') throw new Error('the answer must be retry or park');
+        return { method: 'POST', path: `/v1/owner/${encodeURIComponent(repoOrHome(repo, home))}/resolve`, body: {
+          decision: flags.decision, answer, ...(flags.station !== undefined ? { station: flags.station } : {}),
+          ...(flags.since !== undefined ? { since: flags.since } : {}), ...(flags['dry-run'] ? { dry_run: true } : {}),
+        } };
+      }
+      if (flags.decision !== undefined || flags.station !== undefined || flags.since !== undefined || flags['dry-run']) throw new Error('--decision, --station, --since and --dry-run require --all');
       const fromHome = home?.repository != null && positional.length === 3;
       const [repo, ticket, decision, answer] = fromHome ? [home.repository, ...positional] : positional;
       const local = need(ticket, 'the ticket');

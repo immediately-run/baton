@@ -13,7 +13,7 @@ import { groupBy, isUniqueViolation, logEvent, mintRunId, randomHex, type Random
 import type { Deprecated } from './deprecated';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
 import { afterFailure, countsAsFailed, nonRetryableClass, resumeRecord, type ResumeActivity } from './attempts';
-import { type ClaimPreference, checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOutputs, checkOverride, checkResolve, isGrantedKey, type End, type Output } from './validate';
+import { type ClaimPreference, checkAccept, checkAdvance, checkClaim, checkConfirm, checkDecisionAnswer, checkEnd, checkOutputs, checkOverride, checkResolve, checkRetryDecisions, isGrantedKey, type End, type Output } from './validate';
 import { declaredOutputFault, pointerReach, ticketInputs } from './contracts';
 import { pointerAllowed } from './contractPointers';
 import { GIT_EVIDENCE_TYPE, type PostedAttestation } from './board';
@@ -66,7 +66,7 @@ export interface Ctx {
    *  request's transaction has committed. */
   dispatch: (kind: 'mirror' | 'sync', ticketId: string) => void;
   /** R-BTN-75: whether a claim holds a ticket moves its blocked state; each change says so. */
-  blocks: Pick<Blocks, 'held' | 'forRunner' | 'raise' | 'answer' | 'answerPosted' | 'hasDecision' | 'postedDecision' | 'unavailableReadings'>;
+  blocks: Pick<Blocks, 'held' | 'forRunner' | 'raise' | 'answer' | 'answerPosted' | 'hasDecision' | 'postedDecision' | 'unavailableReadings' | 'closeDecisions'>;
   resourceReadings?: Pick<Resources, 'stateReading'>;
   /** R-BTN-81, R-BTN-85: the ticket's history and Baton's disagreements with git. */
   history: Pick<History, 'record' | 'discrepancy'>;
@@ -165,7 +165,7 @@ interface RequestCache {
   intake: Map<string, 'open' | 'closed'>;
   item: Map<string, ItemFacts | null>;
   candidatePages: Map<string, { cursor: [number, number, number, number, number, string]; count: number }>;
-  override: Map<string, { expedite: number; hold: number; retry_after: number | null } | null>;
+  override: Map<string, { expedite: number; hold: number; hold_reason: string | null; retry_after: number | null } | null>;
 }
 
 /** B-237 (R-BTN-196): an idle runner's last answer — nothing eligible — kept while the state
@@ -495,7 +495,7 @@ export class Claims {
 
   private override(id: string) {
     return this.memo(this.cache?.override, id, () =>
-      this.rows<{ expedite: number; hold: number; retry_after: number | null }>('SELECT expedite, hold, retry_after FROM ticket_overrides WHERE ticket_id = ?', id)[0] ?? null);
+      this.rows<{ expedite: number; hold: number; hold_reason: string | null; retry_after: number | null }>('SELECT expedite, hold, hold_reason, retry_after FROM ticket_overrides WHERE ticket_id = ?', id)[0] ?? null);
   }
 
   /** The counter's last number handed out for `repo` (R-BTN-62): recorded with a claim, an
@@ -1719,6 +1719,7 @@ export class Claims {
     }
     if (run) {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', at, now, b.evidence, claimId, run.seq);
+      this.finishExhaustedRetry(c.ticket_id, run.leg);
       // B-234 (R-BTN-195): the finished run's open `interact` closes with it — the ask was for
       // that session, and the run is done.
       if (run.run_id != null) this.c.conditions.runEnded(claimId, run.run_id);
@@ -2149,6 +2150,7 @@ export class Claims {
     const reached = opts.reached ?? c.station;
     if (run && opts.finished) {
       this.exec('UPDATE claim_legs SET to_station = ?, finished_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', reached, now, opts.evidence ?? null, claimId, run.seq);
+      this.finishExhaustedRetry(ticketId, run.leg);
     } else if (run) {
       // A reap, a stale-board release or an end at the leg's `from`: the leg was given up.
       this.exec('UPDATE claim_legs SET abandoned_at = ?, evidence = ? WHERE claim_id = ? AND seq = ?', now, opts.evidence ?? null, claimId, run.seq);
@@ -2190,7 +2192,9 @@ export class Claims {
     // started, a decision posted while held) logs `blocked`, which wakes no one.
     this.c.blocks.held(ticketId, false);
     if (status === 'completed') this.confirmByClosure(claimId);
-    else if (reason === 'released:cannot-finish:contract-input') {
+    else if (this.override(ticketId)?.hold_reason === 'parked') {
+      // An owner may park a retry while its claim is still finishing. Its end cannot reopen it.
+    } else if (reason === 'released:cannot-finish:contract-input') {
       this.hold(ticketId, 'non-retryable:contract-input', 'baton', { claim_id: claimId, detail: opts.detail ?? null });
       this.c.blocks?.raise(ticketId, 'baton.contract', opts.detail ?? null);
     } else this.applyRetryPolicy(claimId, ticketId, reason, run?.leg, opts.detail ?? opts.error?.message);
@@ -2261,7 +2265,8 @@ export class Claims {
         this.c.blocks.raise(item, 'baton:retries', detail ?? `Non-retryable failure: ${cls}`);
         return;
       }
-      const next = afterFailure(failed.length, this.c.admin.retry(repo));
+      const retryLeg = this.rows<{ leg: string | null }>(`SELECT json_extract(exhausted_retry_position, '$.leg') AS leg FROM ticket_overrides WHERE ticket_id = ?`, item)[0]?.leg;
+      const next = retryLeg && (!leg || retryLeg === leg) ? { hold: 'attempts-exhausted' } as const : afterFailure(failed.length, this.c.admin.retry(repo));
       if (leg && this.c.outsideWork?.restore(item, leg, !!next && 'hold' in next)) {
         if (next && 'hold' in next) this.event('attempts-exhausted', 'baton', { claim_id: claimId, attempts: failed, reconcile: leg, course: c.course_id }, item, claimId);
         // The next claim is for the displaced leg, not another retry of reconciliation.
@@ -2293,6 +2298,7 @@ export class Claims {
 
   /** §8: every hold, whoever sets it, is an `override` event and a `held` event with its reason. */
   private hold(item: string, reason: string, actor: string, detail: Record<string, unknown> = {}) {
+    if (reason !== 'owner' && this.override(item)?.hold_reason === 'owner') return;
     this.c.dispatch('mirror', item); // §6.10: the mirror writes the hold's note
     this.upsertOverride(item, actor, { hold: 1, hold_reason: reason });
     this.event('override', actor, { hold: 1, hold_reason: reason }, item, (detail.claim_id as number) ?? null);
@@ -2390,10 +2396,92 @@ export class Claims {
    *  hold (R-BTN-78). */
   private liftHold(item: string, actor: string) {
     this.upsertOverride(item, actor, { hold: 0, hold_reason: null, retry_after: null });
+    this.exec('UPDATE ticket_overrides SET exhausted_retry_position = NULL WHERE ticket_id = ? AND exhausted_retry_position IS NOT NULL', item);
     this.event('override', actor, { hold: 0 }, item);
     this.c.blocks.answer(item, 'baton:retries');
     this.c.outsideWork?.pending(undefined, item);
     this.c.blocks.answer(item, 'baton.contract');
+  }
+
+  /** R-BTN-12: settle holds against the accepted, materialized position, never against a
+   *  claimed position or a refused snapshot. No continuation is started by this lift. */
+  settleClosedHolds(repo: string, sha: string, observation: number) {
+    for (const t of this.rows<{ id: string; status: string | null; course: string | null; station: string | null; closed: string | null; hold: number; hold_reason: string | null }>(
+      `SELECT o.ticket_id AS id, t.status, t.course_id AS course, s.station, c.closed_as AS closed, o.hold, o.hold_reason
+       FROM ticket_overrides o LEFT JOIN closed_tickets c ON c.ticket_id = o.ticket_id
+       LEFT JOIN tickets t ON t.id = o.ticket_id LEFT JOIN ticket_stations s ON s.ticket_id = o.ticket_id
+       WHERE o.ticket_id >= ? || ':' AND o.ticket_id < ? || ';'
+       AND ((o.hold = 1 AND o.hold_reason IS NOT 'owner') OR o.exhausted_retry_position IS NOT NULL)`, repo, repo)) {
+      const end = t.course && t.station && this.stations.graph(repo, t.course)?.ends.has(t.station);
+      if (!t.closed && !end && t.status !== 'done' && t.status !== 'withdrawn' && t.status !== 'superseded') continue;
+      if (t.hold && t.hold_reason !== 'owner') {
+        this.upsertOverride(t.id, 'sync', { hold: 0, hold_reason: null, retry_after: null });
+        this.event('override', 'sync', { hold: 0, reason: 'snapshot-closed', sha, observation }, t.id);
+      }
+      this.c.blocks.closeDecisions(t.id);
+      this.exec('UPDATE ticket_overrides SET exhausted_retry_position = NULL WHERE ticket_id = ? AND exhausted_retry_position IS NOT NULL', t.id);
+    }
+  }
+
+  /** Lift only an unanswered first exhaustion. The failed leg is still queued;
+   *  normal gates (including any fence) continue to decide when it can run. */
+  retryExhausted(now: number) {
+    for (const t of this.rows<{ id: string; course: string; repository: string; station: string; leg: string; failed_leg: string | null }>(
+      `SELECT t.id, t.course_id AS course, t.repository_id AS repository, s.station, s.next_leg AS leg,
+        COALESCE((SELECT l.leg FROM claim_legs l WHERE l.claim_id = h.claim_id ORDER BY l.seq DESC LIMIT 1), c.offered_leg) AS failed_leg
+       FROM ticket_overrides o JOIN tickets t ON t.id = o.ticket_id JOIN repositories r ON r.id = t.repository_id
+       JOIN ticket_stations s ON s.ticket_id = t.id
+       JOIN ticket_decisions d ON d.ticket_id = t.id AND d.decision_id = 'baton:retries' AND d.source = 'baton'
+       JOIN events h ON h.seq = (SELECT MAX(seq) FROM events WHERE ticket_id = t.id AND kind = 'held')
+       LEFT JOIN claims c ON c.id = h.claim_id
+       WHERE o.hold = 1 AND o.hold_reason = 'attempts-exhausted' AND o.exhausted_retry_position IS NULL
+         AND r.retired_at IS NULL AND h.at + 1000 * r.exhausted_retry_s <= ? AND s.next_leg IS NOT NULL
+         AND t.status NOT IN ('done', 'withdrawn', 'superseded')
+         AND NOT EXISTS (SELECT 1 FROM closed_tickets x WHERE x.ticket_id = t.id)
+         AND NOT EXISTS (SELECT 1 FROM claims a WHERE a.ticket_id = t.id AND a.status = 'active')`, now)) {
+      const g = this.stations.graph(t.repository, t.course);
+      if (!g || g.ends.has(t.station) || !leaves(g, t.leg, t.station) || (t.failed_leg && resolveLeg(g, t.failed_leg) !== t.leg)) continue;
+      this.upsertOverride(t.id, 'baton', { hold: 0, hold_reason: null, retry_after: null });
+      this.exec('UPDATE ticket_overrides SET exhausted_retry_position = ? WHERE ticket_id = ?', JSON.stringify({ station: t.station, leg: t.leg }), t.id);
+      this.event('override', 'baton', { hold: 0, reason: 'exhausted-retry', station: t.station, leg: t.leg }, t.id);
+      this.c.blocks.held(t.id, false);
+    }
+  }
+
+  private finishExhaustedRetry(ticket: string, leg: string) {
+    const cleared = this.rows(`UPDATE ticket_overrides SET exhausted_retry_position = NULL
+      WHERE ticket_id = ? AND hold = 0 AND json_extract(exhausted_retry_position, '$.leg') = ? RETURNING ticket_id`, ticket, leg);
+    if (cleared.length) this.c.blocks.answer(ticket, 'baton:retries');
+  }
+
+  retryDecisions(repo: string, station: string | null = null, since: number | null = null) {
+    return this.rows<{ ticket_id: string; station: string | null; opened_at: number | null }>(
+      `SELECT d.ticket_id, s.station, (SELECT MAX(h.at) FROM ticket_history h WHERE h.ticket_id = d.ticket_id
+        AND h.kind = 'decision-opened' AND json_extract(h.detail_json, '$.decision') = d.decision_id) AS opened_at
+       FROM ticket_decisions d JOIN tickets t ON t.id = d.ticket_id LEFT JOIN ticket_stations s ON s.ticket_id = t.id
+       WHERE t.repository_id = ? AND d.decision_id = 'baton:retries' AND d.source = 'baton'
+         AND (? IS NULL OR s.station = ?) AND (? IS NULL OR opened_at >= ?)
+       ORDER BY d.ticket_id`, repo, station, station, since, since);
+  }
+
+  resolveRetryDecisions(actor: string, repo: string, body: unknown, session: boolean) {
+    const a = checkRetryDecisions(body);
+    if (session && !a.dry_run && !a.confirm) throw new BatonError('confirm-required', 'confirm the batch before answering');
+    const tickets = this.retryDecisions(repo, a.station, a.since);
+    if (!a.dry_run) {
+      for (const { ticket_id } of tickets) this.answerRetryDecision(ticket_id, actor, 'baton:retries', a.answer);
+      this.event('admin', actor, { act: 'resolve-all', decision: 'baton:retries', answer: a.answer, station: a.station, since: a.since, count: tickets.length }, null, null, repo);
+    }
+    return { ok: true, dry_run: a.dry_run, answer: a.answer, tickets };
+  }
+
+  private answerRetryDecision(ticket: string, actor: string, decision: 'baton:retries' | 'baton.contract', answer: 'retry' | 'park') {
+    const hold = this.override(ticket);
+    if (answer === 'retry' && hold?.hold_reason !== 'owner') this.liftHold(ticket, actor);
+    else {
+      if (answer === 'park' && !hold?.hold) this.hold(ticket, 'parked', actor);
+      this.c.blocks.answer(ticket, decision);
+    }
   }
 
   /**
@@ -2422,8 +2510,7 @@ export class Claims {
     }
     if (!this.c.blocks.hasDecision(ticket, a.decision)) throw new BatonError('not-found', `${ticket} has no open ${a.decision} decision`);
     if (a.decision === 'baton:retries' || a.decision === 'baton.contract') {
-      if (a.answer === 'retry') this.liftHold(ticket, actor);
-      else this.c.blocks.answer(ticket, a.decision);
+      this.answerRetryDecision(ticket, actor, a.decision, a.answer);
     } else {
       if (a.answer === 'retry') {
         this.exec(`UPDATE ticket_next_legs SET waiting_since = ? WHERE ticket_id = ? AND leg = (SELECT next_leg FROM ticket_stations WHERE ticket_id = ?)`,

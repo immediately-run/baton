@@ -269,6 +269,7 @@ built; their design is [the people and dashboard proposal](../proposals/people-a
   | `owner member add <repository> <pub> --answers <label,…>`, `owner member answers <repository> <fingerprint> <label,…>`, `owner member remove <repository> <fingerprint>` | adds, changes or removes a member (proposed: B-338) | R-BTN-204 |
   | `owner bar add <repository> --course <c> --tag <t>`, `owner bar lift <repository> <id>`, `owner bar follow <repository> <course>` | the owner's bars | R-BTN-67, R-BTN-142 |
   | `owner settings show <repository>`, `owner settings set <repository>` | reads (`owner.grant.list`) or sets the owner settings | R-BTN-66, R-BTN-140 |
+  | `owner resolve <repository> --decision baton:retries --all [--station S] [--since T] [--dry-run] retry or park` | previews or answers the matching open retry decisions in one request (`owner.resolve-all`) | R-BTN-122 |
   | `owner policy show <repository>`, `owner policy diff <repository> [<version>]`, `owner policy log <repository>`, `owner policy set <repository> <file>`, `owner policy apply <repository> <preset>` | reads (`repo.policy`, `owner.policy.log`) or sets the policy | R-BTN-188 |
   | `owner consent add <repository> <home>`, `owner consent withdraw <repository> <home>` | a `code_repos` consent (proposed: [data model and API](../proposals/data-model-and-api.md)) | R-BTN-140 |
   | `owner sync-key add <repository> <pub> --role sync\|mirror`, `owner sync-key revoke <repository> <fingerprint>` | sync and mirror keys | R-BTN-93 |

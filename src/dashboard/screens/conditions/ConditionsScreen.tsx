@@ -9,7 +9,7 @@
 // and the read's `allowed` (none today: resolving is B-56's), and a person leg's options are
 // text with the CLI line that answers them — no session writes an attestation. Every value is
 // a read's text (§12.3); a link to another origin passes the link rule or is text.
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Controls } from '../../app/controls/Controls';
 import { ReadGate } from '../../app/Refusal';
 import { Link, navigate, pathOrNull, useSearch } from '../../app/router';
@@ -150,6 +150,26 @@ function ConditionRow({ condition, repository }: { condition: Condition; reposit
 
 const rank = (s: unknown): number => (s === 'critical' ? 0 : s === 'high' ? 1 : 2);
 
+function RetryDecisions({ repository, decisions }: { repository: string; decisions: NonNullable<NeedsYou['retry_decisions']> }) {
+  const [result, setResult] = useState<{ dry_run?: boolean; tickets?: typeof decisions } | null>(null);
+  if (!decisions.length && !result) return null;
+  return (
+    <div className="needs-main">
+      {decisions.length > 0 ? <>
+        <p><strong>{decisions.length} open retry decisions</strong> — Retry lets the leg run again. Park leaves the ticket on hold.</p>
+        <Controls view="repository/conditions" target={{ repository, decision: 'baton:retries' }} allowed={['owner.resolve-all']}
+          onDone={(data) => setResult(data as typeof result)} />
+        <details><summary>Tickets with open retry decisions</summary>
+          <ul>{decisions.map((d) => <li key={d.ticket_id}><TicketLink id={d.ticket_id} repository={repository} /> · <Text value={d.station} /></li>)}</ul>
+        </details>
+      </> : null}
+      {Array.isArray(result?.tickets) ? <p role="status">{result.dry_run ? 'Would answer' : 'Answered'} {result.tickets.length} decisions{result.tickets.length ? ': ' : '.'}
+        {result.tickets.map((d, i) => <span key={d.ticket_id}>{i ? ', ' : ''}<TicketLink id={d.ticket_id} repository={repository} /></span>)}
+      </p> : null}
+    </div>
+  );
+}
+
 /** The closed and open conditions together, by id — drawn only when asked for (`?open=0`). */
 function AllConditions({ repository, type, ticket }: { repository: string; type: string; ticket: string }) {
   const pager = usePager();
@@ -234,10 +254,11 @@ export function ConditionsScreen({ params, role }: ScreenProps) {
               {typeof data.held_posts === 'number' && data.held_posts > 0 && sync ? (
                 <Band tone="warn"><p>A rewritten history is held: <Link to={sync}><Text value={data.held_posts} /> held on Sync</Link>, where it is accepted.</p></Band>
               ) : null}
-              <Section title="Needs you" count={needs.length} tone={needs.length ? 'warn' : 'mut'}>
-                {needs.length === 0
+              <Section title="Needs you" count={needs.length + (data.retry_decisions?.length ?? 0)} tone={needs.length || data.retry_decisions?.length ? 'warn' : 'mut'}>
+                {!type && !ticket ? <RetryDecisions key={repository} repository={repository} decisions={data.retry_decisions ?? []} /> : null}
+                {needs.length === 0 && (type || ticket || !data.retry_decisions?.length)
                   ? <Empty>Nothing needs you right now.</Empty>
-                  : <ul className="needs-list">{needs.map((x) => <FragmentRow key={x.key}>{x.node}</FragmentRow>)}</ul>}
+                  : needs.length > 0 ? <ul className="needs-list">{needs.map((x) => <FragmentRow key={x.key}>{x.node}</FragmentRow>)}</ul> : null}
                 {conditions.some((c) => c.restarts && Object.keys(c.restarts).length > 0) ? <NotBuiltNote what="Resolving a condition by one of its restarts" ticket={data.not_built?.resolve ?? 'B-56'} /> : null}
               </Section>
               <Section title="Also waiting" count={others.length} tone={others.length ? 'warn' : 'mut'} hint="Listed by Baton, and not conditions yet.">

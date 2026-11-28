@@ -39,6 +39,7 @@ describe('plan: one request per command', () => {
       ['repo.accept-post', 'admin', 'repo', 'accept-post', 'docs', 'a'.repeat(40)],
       ['repo.resync', 'admin', 'repo', 'resync', 'docs'],
       ['repo.resync', 'owner', 'repo', 'resync', 'docs'],
+      ['owner.resolve-all', 'owner', 'resolve', 'docs', '--decision', 'baton:retries', '--all', 'retry'],
       ['runner.status-request', 'runner', 'status', '7'],
       ['runner.wind-down', 'runner', 'wind-down', '7', '--repository', 'docs'],
       ['leg.stop', 'leg', 'stop', 'docs:A', '--yes'],
@@ -252,6 +253,8 @@ describe('plan: one request per command', () => {
   it('owner resolve and ticket history (R-BTN-78, R-BTN-81)', () => {
     expect(plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries', 'retry'], key))
       .toEqual({ method: 'POST', path: '/v1/owner/docs/tickets/docs%3AR3-1/resolve', body: { decision: 'baton:retries', answer: 'retry' } });
+    expect(plan('owner', ['resolve', 'docs', '--decision', 'baton:retries', '--all', '--station', 'filed', '--since', '2026-11-27T00:00:00Z', '--dry-run', 'park'], key))
+      .toEqual({ method: 'POST', path: '/v1/owner/docs/resolve', body: { decision: 'baton:retries', answer: 'park', station: 'filed', since: '2026-11-27T00:00:00Z', dry_run: true } });
     expect(plan('owner', ['resolve', 'docs', 'docs:R3-1', 'baton:stalled', 'park'], key).path).toBe('/v1/owner/docs/tickets/docs%3AR3-1/resolve');
     expect(() => plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries'], key)).toThrow("the answer (retry or park, or one of the posted decision's options) is required");
     expect(() => plan('owner', ['resolve', 'docs', 'R3-1', 'baton:retries', 'retry', 'extra'], key)).toThrow('no further argument');

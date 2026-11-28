@@ -1196,6 +1196,22 @@ export function checkDecisionAnswer(body: unknown):
   return { decision: b.decision as 'baton:retries' | 'baton:stalled' | 'baton.contract', answer: b.answer as 'retry' | 'park' };
 }
 
+/** B-360: repository-scoped filters on open retry decisions. */
+export function checkRetryDecisions(body: unknown) {
+  if (!isObj(body)) bad('body', 'must be a JSON object');
+  const b = body as Record<string, unknown>;
+  for (const k of Object.keys(b)) if (!['decision', 'answer', 'station', 'since', 'dry_run', 'confirm'].includes(k)) bad(`body.${k}`, 'unknown field');
+  const { decision, answer, station, since, dry_run, confirm } = b;
+  if (decision !== 'baton:retries') bad('decision', 'bulk resolve only answers baton:retries');
+  if (answer !== 'retry' && answer !== 'park') bad('answer', 'must be retry or park');
+  if (station !== undefined && (typeof station !== 'string' || !COURSE_ID.test(station))) bad('station', 'must be a station name');
+  if (since !== undefined && (typeof since !== 'string' || !LOCAL_ORDER_AT.test(since) || !Number.isFinite(Date.parse(since)))) bad('since', 'must be an ISO 8601 UTC instant');
+  if (dry_run !== undefined && typeof dry_run !== 'boolean') bad('dry_run', 'must be a boolean');
+  if (confirm !== undefined && confirm !== true) bad('confirm', 'must be true');
+  return { answer: answer as 'retry' | 'park', station: (station as string | undefined) ?? null,
+    since: since === undefined ? null : Date.parse(since as string), dry_run: dry_run === true, confirm: confirm === true };
+}
+
 /** R-BTN-163: interaction delivery is opt-in on each runner grant. */
 export function checkDeliverInteractions(value: unknown): boolean {
   if (value === undefined) return false;

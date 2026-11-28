@@ -14,19 +14,28 @@ export async function operatorRoute(core: Pick<BatonCore, 'admin' | 'store' | 'r
   if (!hit) return null;
   const { action, params } = hit;
   const scoped = params.repository !== undefined;
-  if (role === 'session' ? !admitsSession(action, 'administrator') : !keyCaller(action, role) || scoped !== (role === 'owner')) {
+  const retryBatch = action.id === 'owner.resolve-all';
+  if (retryBatch && (url.pathname.startsWith('/v1/owner/') !== (role === 'owner'))) {
+    throw new BatonError('forbidden', 'this credential cannot answer retry decisions on this route');
+  }
+  if (role === 'session' ? !admitsSession(action, 'administrator') : !keyCaller(action, role) || (!retryBatch && scoped !== (role === 'owner'))) {
     throw new BatonError('forbidden', 'this key cannot call this action on this route');
   }
   const tx = <T>(f: (repo?: string) => T): T => core.store.transaction(() => {
     if (!scoped) return f();
     const { id } = liveRepoParam(core.registry, pathSegment(params.repository));
-    if (!core.admin.owns(owner, id)) throw new BatonError('forbidden', `this key does not own ${id}`);
+    const adminBatch = role !== 'owner' && retryBatch;
+    if (!adminBatch && !core.admin.owns(owner, id)) throw new BatonError('forbidden', `this key does not own ${id}`);
     return f(id);
   });
   const number = (raw: string) => {
     if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new BatonError('not-found', 'no such id');
     return Number(raw);
   };
+  if (retryBatch) {
+    const body = await readJson(req);
+    return json(tx((repo) => core.claims.resolveRetryDecisions(`${role === 'owner' ? 'owner' : 'admin'}:${owner}`, repo!, body, role !== 'owner')));
+  }
   // Messages and overrides share a path and their existing validators read the whole body.
   if (['leg.stop', 'runner.status-request', 'runner.wind-down'].includes(action.id)) {
     const body = await readJson(req);

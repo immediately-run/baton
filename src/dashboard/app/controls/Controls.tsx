@@ -121,7 +121,7 @@ function CodeDialog({ code, control, target, onClose }: { code: string; control:
   );
 }
 
-function ControlItem({ control, target, onDone }: { control: Control; target: Record<string, unknown>; onDone?: () => void }) {
+function ControlItem({ control, target, onDone }: { control: Control; target: Record<string, unknown>; onDone?: (data: unknown) => void }) {
   const store = useReadStore();
   const id = useId();
   const form = control.form;
@@ -152,7 +152,7 @@ function ControlItem({ control, target, onDone }: { control: Control; target: Re
       setConfirming(null);
       if (res.status === 'confirm') setCode(res.code);
       else {
-        onDone?.();
+        onDone?.(res.data);
         await store.refresh();
       }
     } catch (e) {
@@ -176,7 +176,7 @@ function ControlItem({ control, target, onDone }: { control: Control; target: Re
     const read = readForm(fields, raw);
     setFaults(read.faults);
     if (Object.keys(read.faults).length > 0) return;
-    if (control.dialog) setConfirming(read.values);
+    if (control.dialog && read.values.dry_run !== true) setConfirming(read.values);
     else void send(read.values, false);
   };
 
@@ -222,6 +222,7 @@ function ControlItem({ control, target, onDone }: { control: Control; target: Re
         >
           <p>{control.entry.summary}</p>
           <TargetList target={target} />
+          <TargetList target={confirming} />
         </Dialog>
       ) : null}
       {code ? <CodeDialog code={code} control={control} target={target} onClose={() => setCode(null)} /> : null}
@@ -233,7 +234,7 @@ function ControlItem({ control, target, onDone }: { control: Control; target: Re
  *  `target` the ids the screen knows — they fill the routes' parameters and the inputs' fields of
  *  the same name — and `allowed` the read's own word where it carries one. Draws nothing when
  *  the session has no entry for the screen. */
-export function Controls({ view, target, allowed, label = 'Actions', onDone }: { view: string; target: Record<string, unknown>; allowed?: readonly string[] | null; label?: string; onDone?: () => void }) {
+export function Controls({ view, target, allowed, label = 'Actions', onDone }: { view: string; target: Record<string, unknown>; allowed?: readonly string[] | null; label?: string; onDone?: (data: unknown) => void }) {
   const controls = useControls(view, target, allowed);
   if (controls.length === 0) return null;
   return (

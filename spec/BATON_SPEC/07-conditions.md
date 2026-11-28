@@ -254,6 +254,13 @@ Not built either, each a design its rule below still states:
       holds.
     - `contract-input` holds at once, is not an attempt and raises `baton.contract`.
     - `lease-lost` counts once per distinct runner.
+    - An unanswered `attempts-exhausted` hold on a live ticket becomes eligible for one
+      automatic retry when its age reaches the owner setting `exhausted_retry_s` (whole seconds,
+      1–2592000, default 86400, R-BTN-66). The alarm lifts the hold, records the retry, resets the
+      attempts and makes the failed, still-queued leg available through the usual gates. The
+      retry decision stays open until the leg succeeds, the ticket closes (R-BTN-12), or an owner
+      answers it. A counted failure of that retry holds immediately and cannot time out again.
+      An owner's `park` ends the decision and keeps or sets a hold; `retry` restarts the normal policy.
   - **Owners' bounds.** The owners' `retry` setting, a Baton setting (R-BTN-66), bounds every
     policy: `{max_attempts, backoff_s}`, a ceiling on the first and a floor under the second,
     applied field by field as the stricter of the course's policy and the owners' bound. The

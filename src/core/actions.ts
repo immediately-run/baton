@@ -291,6 +291,19 @@ export const ACTIONS: Action[] = [
     ui: { route: { method: 'POST', path: '/v1/ui/overrides/{ticket}' }, view: ['repository/tickets/{ticket}'] },
   },
   {
+    id: 'owner.resolve-all', summary: 'Answer retry decisions: retry or park the matching tickets together.',
+    effect: 'write', http: { method: 'POST', path: '/v1/admin/repositories/{repository}/resolve' },
+    ownerHttp: { method: 'POST', path: '/v1/owner/{repository}/resolve' },
+    callers: [ADMIN, OWNER, SESSION_ADMIN],
+    input: { type: 'object', required: ['decision', 'answer'], properties: {
+      decision: { type: 'string', const: 'baton:retries' }, answer: { type: 'string', enum: ['retry', 'park'] },
+      station: { type: 'string', description: 'Only tickets at this station.' },
+      since: { type: 'string', description: 'Only decisions opened at or after this ISO 8601 UTC time.' },
+      dry_run: { type: 'boolean', description: 'List matching tickets without answering.' }, confirm: CONFIRM,
+    } },
+    ui: { route: { method: 'POST', path: '/v1/ui/repositories/{repository}/resolve' }, view: ['repository/conditions'] },
+  },
+  {
     id: 'claim.force-reap', summary: 'Force-reap a live claim: its lease ends now.',
     effect: 'destructive', http: { method: 'POST', path: '/v1/admin/claims/{claim}/reap' },
     callers: [ADMIN, SESSION_ADMIN],

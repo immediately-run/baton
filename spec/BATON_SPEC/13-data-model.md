@@ -52,6 +52,7 @@ behaviour, bounds and defaults. The tables of designs not built yet are in
 | `transcript_repos` JSON | `[]` | R-BTN-20 |
 | `artifact_buckets` JSON | `[]` | R-BTN-82 |
 | `retry` JSON | NULL (core defaults) | R-BTN-122 |
+| `exhausted_retry_s` INTEGER | R-BTN-122 | Delay before one automatic retry |
 | `required_bars` JSON `[{course, leg, except?, tag_prefix}]` | `[]` | R-BTN-67 |
 | `unblocked_trigger` JSON (the `dispatch` shape) | NULL | R-BTN-77, R-BTN-94 |
 | `pushers` JSON (forge user ids) | `[]` | R-BTN-139 |

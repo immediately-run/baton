@@ -150,6 +150,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
         settleSpawned(core, r, p, n, at);
         const confirmed = core.claims.confirm(confirmations, n);
         const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations), p.read_sha === p.sha);
+        if (p.read_sha === p.sha) core.claims.settleClosedHolds(r, p.sha, n);
         remember();
         return { ok: true, unchanged: true, ...(p.read_sha === p.sha ? { tickets_upserted: 0, tickets_deleted: 0 } : {}),
           confirmed: confirmed + judged.confirmed, stale_released: judged.stale_released };
@@ -215,6 +216,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
       const seen = normative ? refreshStations(core, r, p, n, at, wrote) : new Map<string, Seen>();
       const confirmed = core.claims.confirm(confirmations, n);
       const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations), readAtHead);
+      if (readAtHead) core.claims.settleClosedHolds(r, p.sha, n);
       remember();
       return {
         ok: true, unchanged: true,
@@ -317,6 +319,7 @@ async function boardPost(core: BoardPostCore, repo: Repository, p: BoardPayload,
     const judged = core.claims.judge(r, n, seen, core.claims.evidenceOf(r, p.attestations), true);
     changed.confirmed = confirmed + judged.confirmed;
     changed.stale_released = judged.stale_released;
+    core.claims.settleClosedHolds(r, p.sha, n);
     remember();
   });
   return { ok: true, ...changed };
@@ -513,10 +516,10 @@ function materialize(core: Pick<BatonCore, 'store' | 'sql' | 'claims' | 'history
     const to = key != null ? byKey.get(key) : undefined;
     if (key != null && to != null && to !== gone) {
       core.store.exec(
-        `INSERT INTO ticket_overrides (ticket_id, expedite, hold, hold_reason, retry_after, set_by, set_at, runs_json)
-         SELECT ?, expedite, hold, hold_reason, retry_after, set_by, set_at, runs_json FROM ticket_overrides WHERE ticket_id = ?
+        `INSERT INTO ticket_overrides (ticket_id, expedite, hold, hold_reason, retry_after, set_by, set_at, runs_json, exhausted_retry_position)
+         SELECT ?, expedite, hold, hold_reason, retry_after, set_by, set_at, runs_json, exhausted_retry_position FROM ticket_overrides WHERE ticket_id = ?
          ON CONFLICT (ticket_id) DO UPDATE SET hold = excluded.hold, hold_reason = excluded.hold_reason,
-           retry_after = excluded.retry_after, runs_json = excluded.runs_json`,
+           retry_after = excluded.retry_after, runs_json = excluded.runs_json, exhausted_retry_position = excluded.exhausted_retry_position`,
         qualify(r, to), id);
       core.store.exec('DELETE FROM ticket_overrides WHERE ticket_id = ?', id);
       event(core, r, 'renumbered', { from: gone, to, key }, at);

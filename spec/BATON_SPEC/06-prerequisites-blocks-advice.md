@@ -458,13 +458,16 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
     sets a hold and lifts only its own (R-BTN-186). Lifting a hold resets the leg's attempt
     (R-BTN-122) and blocked-end counts.
   - Each change is logged `override`; each hold also `held` with its `hold_reason`.
+  - An accepted snapshot that shows a source closure or places the ticket at an end station
+    lifts a non-owner hold and closes its decisions. The lift records the snapshot's SHA and
+    observation and queues no work. An `owner` hold stays until an owner or operator lifts it.
   - `ticket_overrides` also holds the queued leg Baton or the owner chose, until the station
     changes: an owner's route, a retry policy's `exhausted` leg, a person leg's expiry
     (R-BTN-83).
   - **Owner state outlives the board.** When a ticket leaves the board, closed or dropped
     (R-BTN-147), its `ticket_overrides` row (a hold with its reason, expedite, a re-route) and
     its `leg_attempts` are kept in its `closed_tickets` row, and restored when a post returns the
-    same id: the hold stands, no attempt is refunded, and a backoff not yet over blocks again.
+    same id: an unsettled hold stands and a backoff not yet over blocks again.
     Baton's traversal record (R-BTN-63) stays with the claims. A ticket re-filed under a new id
     is a new ticket and carries no hold (only a renumbering at the same path does, R-BTN-147).
     The dashboard's course screens (§11.4) list every closed or dropped ticket that keeps a
