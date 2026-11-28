@@ -57,7 +57,7 @@ const minute = 60_000;
 const transient = 'released:cannot-finish:transient';
 type Key = 'vm-a' | 'vm-b';
 
-async function board(size: number) {
+async function faultBoard(size: number) {
   await setClock(start);
   const git = new Git();
   for (let n = 0; n < size; n++) git.add(`FAULT-${n}`);
@@ -92,7 +92,7 @@ const notices = () => rows<{ id: number; type: string; detail_json: string }>(
   `SELECT id, type, detail_json FROM conditions WHERE outcome = 'open' AND type LIKE 'baton.%faulting' ORDER BY id`);
 
 it('S-BTN-6 restores ten tickets, lifts only burst holds, and recovers on a leg outcome', async () => {
-  const git = await board(12);
+  const git = await faultBoard(12);
   // A one-attempt repository exercises the retroactive hold/decision removal.
   await rows('UPDATE repositories SET retry = ? WHERE id = ?', JSON.stringify({ backoff_ms: [minute], max_failed: 1 }), 'docs');
   const a = await runner('vm-a');
@@ -126,7 +126,7 @@ it('S-BTN-6 restores ten tickets, lifts only burst holds, and recovers on a leg 
 });
 
 it('S-BTN-6 deduplicates fleet and runner notices and doubles a repeated backoff', async () => {
-  await board(12);
+  await faultBoard(12);
   const a = await runner('vm-a');
   const b = await runner('vm-b');
   const first = await take(a, 0, 1, 2);
@@ -144,7 +144,7 @@ it('S-BTN-6 deduplicates fleet and runner notices and doubles a repeated backoff
 });
 
 it('S-BTN-6 keeps a solitary ticket exhausted and non-retryable ends out of a burst', async () => {
-  const git = await board(4);
+  const git = await faultBoard(4);
   await rows('UPDATE repositories SET retry = ? WHERE id = ?', JSON.stringify({ backoff_ms: [minute], max_failed: 3 }), 'docs');
   const a = await runner('vm-a');
   for (let i = 0; i < 3; i++) {
