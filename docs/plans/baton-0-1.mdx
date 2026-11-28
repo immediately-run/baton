@@ -136,7 +136,7 @@ Criterion 2 cannot hold while Baton's position is only as good as a reading of P
 B-401 comes first and builds nothing. B-402 and B-404 follow it, in parallel; B-403 needs B-402's
 record of the branch heads it relayed. B-120 can run beside all of them: its dependency on B-140
 is only "for protected homes' fact legs", and this repository is `cooperative` (D9). B-405 comes
-last. B-120's rank and B-366's dependencies on this phase wait on D9.
+last. B-120's rank and B-366's dependencies on this phase are set (D9).
 
 ### Phase C — the course says one thing
 
@@ -195,9 +195,11 @@ Each has a default that this plan assumes until answered.
   delivered (a filing, spec or partial PR merged), yet Baton holds them at `merged`, so no runner is
   offered them: B-374 asks for them to be put back on the course.
 
-- **D9 — Fitting B-120 and phase B into the ranks**, which Dibber 0.4.0 cannot change after filing.
-  - (a) One more hand edit, as D7's: B-120's `order` to 78; its `depends_on` loses B-140, which it needs only for protected homes' fact legs; B-366's `depends_on` gains B-374, B-401 to B-405 and B-120. **Default.**
-  - (b) Leave them until B-362 gives Dibber a re-rank command: B-120 then sorts at 1095, behind most of the backlog, and B-366 does not wait on phase B.
+- **D9 — Fitting B-120 and phase B into the ranks.** **Answered**, the owner, 2026-11-28: "Yes".
+  Set by hand, as D7's were: B-120's `order` is 78 and it no longer depends on B-140, which it
+  needs only for protected homes' fact legs; B-366 depends on B-120 and B-401 to B-405 as
+  well. B-374 joins B-366's dependencies once #469, which files it, has landed; the goal names it
+  meanwhile.
 
 ## Housekeeping found on the way
 
