@@ -9,6 +9,7 @@ import { Stations } from './stations';
 import { Questions } from './questions';
 import { OutsideWork, EVIDENCE_TYPE } from './outsideWork';
 import { Conditions } from './conditions';
+import { RunnerFaults } from './runnerFaults';
 import { Admin } from './admin';
 import { batonNow } from '../shared/baton.mjs';
 import { RunnerApi } from './runnerApi';
@@ -201,7 +202,8 @@ export class BatonCore {
       schema: (repo, id) => this.courses.schema(repo, id), intake: (repo, course) => this.queues.intake(repo, course),
       dispatch: (kind, ticketId) => want({ repository: repositoryOf(ticketId), kind }) ,
       policies: this.policies, forgeOf: (repo) => this.registry.get(repo)?.forge ?? DEFAULT_FORGE, scope: this.scope, deprecated: this.deprecated,
-      conditions: this.conditions, sessionHosts: () => this.instance.sessionHosts(), outsideWork: this.outsideWork });
+      conditions: this.conditions, runnerFaults: new RunnerFaults(store, () => this.now(), this.conditions),
+      sessionHosts: () => this.instance.sessionHosts(), outsideWork: this.outsideWork });
     this.cutover = new Cutover({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });
     this.stats = new Stats(store, this.queues);
     this.mirror = new Mirror({ store, now: () => this.now(), held: (ticket) => this.blocks.held(ticket, true) });

@@ -71,6 +71,7 @@
 //                             [--code-repos [<forge>:]<owner>/<name>[@<host>],… | none] [--forge-ids <repo id>,<owner id>]   (B-182, R-BTN-140)
 //                             [--pushers <forge user id>[@<host>],… | none]                                                          (B-182, R-BTN-139)
 //                [--retry 1h,4h --max-failed 3 | --retry default] [--transcript-repos a,b]
+//                [--runner-fault-tickets 3 --runner-fault-window 15m | --runner-fault-tickets default]
 //                [--unblocked-workflow .github/workflows/F.yml | --unblocked-workflow none] [--remind-after 24h]
 //                [--require-signed-control | --no-require-signed-control]   (B-127: control inputs
 //                count only at commits an owner's human-only key signed; on tightens, off needs
@@ -627,6 +628,11 @@ export function plan(role, argv, readKey = (p) => (/^(ssh|sk|ecdsa)-/.test(p) ? 
       // `--retry default` returns to Baton's default policy (R-BTN-23).
       if (flags.retry === 'default') body.retry = null;
       else if (flags.retry) body.retry = { backoff_ms: list(flags.retry).map(duration), max_failed: Number(need(flags['max-failed'], '--max-failed (with --retry)')) };
+      if (flags['runner-fault-tickets'] === 'default') body.runner_faults = null;
+      else if (flags['runner-fault-tickets'] !== undefined || flags['runner-fault-window'] !== undefined) {
+        body.runner_faults = { tickets: Number(need(flags['runner-fault-tickets'], '--runner-fault-tickets')),
+          window_s: duration(need(flags['runner-fault-window'], '--runner-fault-window')) / 1000 };
+      }
       if (flags['transcript-repos']) body.transcript_repos = list(flags['transcript-repos']);
       // R-BTN-77's trigger: a workflow path on GitHub, or `none` to clear it.
       if (flags['unblocked-workflow'] === 'none') body.unblocked_trigger = null;

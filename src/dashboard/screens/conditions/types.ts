@@ -15,6 +15,7 @@ export interface Condition {
   url: string | null;
   restarts: Record<string, string> | null;
   default: string | null;
+  detail?: { runner?: string; runners?: number; reasons?: { end_reason: string; error_type: string | null; count: number }[] };
   outcome?: string | null;
   closed_at?: number | null;
   closed_how?: string | null;

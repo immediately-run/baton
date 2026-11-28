@@ -154,7 +154,12 @@ describe('B-168 the settings: the unblocked trigger is a loosening, and the dash
     const settings = state.limits.settings.find((s) => s.repository_id === 'docs')!;
     // B-182's forge, web_base, code_repos and pushers and B-127's require_signed_control beside
     // them; required_independence is not among them.
-    expect(Object.keys(settings).sort()).toEqual(['code_repos', 'forge', 'pushers', 'remind_after', 'repository_id', 'require_signed_control', 'required_bars', 'retry', 'runner_pushers', 'scope_policy',
+    expect(Object.keys(settings).sort()).toEqual(['code_repos', 'forge', 'pushers', 'remind_after', 'repository_id', 'require_signed_control', 'required_bars', 'retry', 'runner_faults', 'runner_pushers', 'scope_policy',
       'transcript_repos', 'unblocked_trigger', 'web_base']);
+    const path = '/v1/owner/docs/settings';
+    expect((await keyCall(owner, path, { runner_faults: { tickets: 1, window_s: 60 } }, 'PUT')).status).toBe(400);
+    const policy = { tickets: 2, window_s: 60 };
+    expect((await keyCall(owner, path, { runner_faults: policy }, 'PUT')).status).toBe(200);
+    expect(await rows('SELECT runner_faults FROM repositories WHERE id = ?', 'docs')).toEqual([{ runner_faults: JSON.stringify(policy) }]);
   });
 });

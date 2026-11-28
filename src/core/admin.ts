@@ -10,7 +10,7 @@ import { BatonError, PENDING_COOKIE, SESSION_COOKIE } from './http';
 import { logEvent, randomHex } from './db';
 import { adminFingerprints, API_KEY_FINGERPRINT, KEY_FINGERPRINT, parseApiKeyLine, parseSshKey, sshPublicLine, verifyNamespacedSignature, type SshKey } from './auth';
 import { capabilitiesOf } from '../shared/vocabulary.mjs';
-import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkConfirm, checkDeliverInteractions, checkLogin, checkUnblockedTrigger, checkRepositoryId, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
+import { COURSE_ID, HOSTNAME, INSTANCE_NAME, SESSION_TOKEN, TAG, checkAsks, checkConfirm, checkDeliverInteractions, checkLogin, checkUnblockedTrigger, checkRepositoryId, checkRunnerFaults, HOLDING_TYPE, MAX_CLAIMS_CAP, parseAccessIdentities } from './validate';
 import { REMIND_AFTER_S, type Notices } from './notices';
 import { parseTranscriptRepo } from './links';
 import { checkCodeRepos, checkPushers, codeReposOf, crossHostEntries, homeForgeOf, pushersOf, writeCodeRepos, type CodeRepo } from './codeRepos';
@@ -1054,7 +1054,7 @@ export class Admin {
   async setSettings(actor: string, repository: string, body: unknown) {
     if (!isObj(body)) bad('body', 'must be a JSON object');
     const b = body as Record<string, unknown>;
-    only(b, ['required_bars', 'retry', 'transcript_repos', 'artifact_buckets', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
+    only(b, ['required_bars', 'retry', 'runner_faults', 'transcript_repos', 'artifact_buckets', 'unblocked_trigger', 'remind_after', 'scope_policy', 'runner_pushers', 'code_repos', 'pushers', 'require_signed_control', 'checks'], 'body');
     if (!Object.keys(b).length) bad('body', 'names at least one setting');
     // R-BTN-114: a check's conclusion decides what branch protection sees, so the map is the
     // owners', not an agent's — refused here, before the approver question, whichever it changes.
@@ -1098,6 +1098,10 @@ export class Admin {
     }
     if (b.required_bars !== undefined) sets.push(['required_bars', JSON.stringify(this.checkRequiredBars(repository, b.required_bars))]);
     if (b.retry !== undefined) sets.push(['retry', b.retry === null ? null : JSON.stringify(checkRetry(b.retry))]);
+    if (b.runner_faults !== undefined) {
+      if (delegated) throw new BatonError('forbidden', 'a delegated key does not change runner fault attribution');
+      sets.push(['runner_faults', b.runner_faults === null ? null : JSON.stringify(checkRunnerFaults(b.runner_faults))]);
+    }
     // B-127 (R-BTN-66 as amended): whether the repository's control inputs count only at
     // owner-signed commits. Turning it on tightens (any owner may); off is a loosening below.
     if (b.require_signed_control !== undefined) {
@@ -1190,11 +1194,10 @@ export class Admin {
       if (towardSuccess) return true;
       if (Object.keys(was).some((course) => !Object.hasOwn(next, course))) return true;
     }
-    const flat = ['retry', 'transcript_repos', 'artifact_buckets'];
+    const flat = ['retry', 'runner_faults', 'transcript_repos', 'artifact_buckets'];
     for (const [k, v] of sets) {
       if (flat.includes(k)) {
-        const old = k === 'retry' ? this.retry(repository) : null;
-        const before = k === 'transcript_repos' || k === 'artifact_buckets' ? JSON.parse(this.rows<{ v: string | null }>(`SELECT ${k} AS v FROM repositories WHERE id = ?`, repository)[0]?.v ?? 'null') : old;
+        const before = JSON.parse(this.rows<{ v: string | null }>(`SELECT ${k} AS v FROM repositories WHERE id = ?`, repository)[0]?.v ?? 'null');
         if (JSON.stringify(before ?? null) !== (v ?? 'null')) return true;
       }
       // B-127: requiring signed control tightens (any owner may turn it on); turning it off
@@ -1373,7 +1376,7 @@ export class Admin {
       // §14: probes too, with the instances each may report on (round 3, 3-A-3).
       probes: this.rows(`SELECT id AS fingerprint, label, allowed_instances, created_by FROM credentials WHERE kind = 'probe' AND revoked_at IS NULL ORDER BY label`),
       bars: this.bars(null, now, true),
-      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, scope_policy, runner_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
+      settings: this.rows<Record<string, unknown>>('SELECT id AS repository_id, forge, web_base, required_bars, retry, runner_faults, transcript_repos, unblocked_trigger, remind_after_s AS remind_after, scope_policy, runner_pushers, pushers, require_signed_control FROM repositories WHERE retired_at IS NULL ORDER BY id').map((s) => ({
         ...s,
         // B-182: the home's code repositories beside the column settings — its own table's rows,
         // as the observation hands them to the sync, so the CLI and the dashboard read one shape.

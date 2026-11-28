@@ -122,14 +122,19 @@ function ConditionRow({ condition, repository }: { condition: Condition; reposit
       <KindMark kind={kind} type={condition.type} />
       <div className="needs-main">
         <div className="needs-title">
-          <TicketLink id={condition.ticket_id} repository={repository} />
-          <span>leg <Text mono value={condition.leg} /></span>
+          {condition.detail?.runner ? <span>Runner <Text mono value={condition.detail.runner} /></span>
+            : condition.detail?.runners ? <span><Text value={condition.detail.runners} /> runners</span>
+              : <TicketLink id={condition.ticket_id} repository={repository} />}
+          {condition.leg ? <span>leg <Text mono value={condition.leg} /></span> : null}
         </div>
         <div className="needs-detail">
           {kind.name !== null ? <Text mono value={condition.type} /> : null}
           <Severity value={condition.severity} />
           <span>raised <RelTime at={condition.raised_at} /></span>
           {!interact && condition.url ? <ExtLink href={condition.url} showHost>where it is asked</ExtLink> : null}
+          {Array.isArray(condition.detail?.reasons) ? condition.detail.reasons.map((reason, index) => (
+            <span key={index}><Text value={reason.count} /> × <Text mono value={reason.end_reason} />{reason.error_type ? <> (<Text value={reason.error_type} />)</> : null}</span>
+          )) : null}
         </div>
         <Restarts condition={condition} />
       </div>

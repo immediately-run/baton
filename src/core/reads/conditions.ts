@@ -19,7 +19,7 @@
 //     `repo.needs-you` serves the repository-scoped ones under `listings`, each as the module
 //     that owns it answers it, narrowed to the one repository. The instance-wide ones are named
 //     under `elsewhere` and are `admin.tenant`'s (`needs_you`, ./tenant.ts), drawn on State.
-import { conditionLink } from '../conditions';
+import { conditionLink, coreConditionDetail } from '../conditions';
 import { BatonError } from '../http';
 import { canRead, queryOf, type ReadCall, type ReadCtx, type ReadPrincipal, type ReadRoute } from './kit';
 import type { Row } from '../ports';
@@ -54,9 +54,10 @@ interface ConditionRow {
   closed_at: number | null;
   closed_how: string | null;
   reraised: number;
+  detail_json: string | null;
 }
 
-const CONDITION_COLUMNS = 'id, repository_id, ticket_id, claim_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, outcome, closed_at, closed_how, reraised';
+const CONDITION_COLUMNS = 'id, repository_id, ticket_id, claim_id, run_id, leg, type, disposition, severity, url, restarts_json, default_restart, raised_at, outcome, closed_at, closed_how, reraised, detail_json';
 
 /** A condition as these reads answer it: the list's fields (`Conditions.entry`), and its
  *  outcome, close and Resolve path. `allowed` is the registry ids the caller may call on it —
@@ -71,7 +72,7 @@ function conditionOf(r: ConditionRow, disclose: boolean) {
     condition_id: r.id, ticket_id: r.ticket_id, leg: r.leg, run_id: r.run_id, type: r.type,
     disposition: r.disposition, severity: r.severity, raised_at: r.raised_at, ...conditionLink(r.type, r.url, disclose),
     restarts, default: r.default_restart,
-    ...(r.reraised ? { detail: { reraised: r.reraised } } : {}),
+    ...coreConditionDetail(r),
     outcome: r.outcome, closed_at: r.closed_at, closed_how: r.closed_how,
     resolve_url: resolvePath(r.repository_id, r.id),
     allowed: [] as string[],
