@@ -127,11 +127,18 @@ Criterion 2 cannot hold while Baton's position is only as good as a reading of P
 |---|---|---|
 | 18 | B-374 | A ticket Baton holds at `merged` is closed in its store by a `close` leg; the 33 undelivered tickets are put back on the course |
 | 76 | B-401 | Specify the proxy: the relay, the fact reader's cursor walk (R-BTN-192), the sync's forge half retired |
+| 77 | B-406 | Tickets under Baton say `status: orchestrator`: closure only from Baton's record, Baton answers Dibber's status query, no leg writes a status (Dibber's half is DIB-35) |
 | 78 | B-120 | No snapshot places a ticket; owner adopt sets a position (R-BTN-39 built as written) |
 | 79 | B-402 | The proxy's relay: legs reach git and the forge only with per-claim tokens |
 | 81 | B-403 | The cursor walk: each new default-branch commit's PR found, verified with the forge, attested `pr-merged` |
 | 82 | B-404 | `create-pr` gains a `merged-by-hand` fact leg and a reconcile leg |
 | 83 | B-405 | The sync reads the ticket store only; Baton stops dispatching forge syncs |
+
+The owner, 2026-11-28, also: "Dibber tickets should use "status: orchestrator" when used with
+baton", the file staying `orchestrator` after Baton closes the ticket, and this in phase B. That
+removes the stale copy at the source: a file no longer says `available` or `done` for Baton to be
+contradicted by (B-406, with Dibber's DIB-35; `dibber edit`, DIB-34, lets the store's own fields
+change through Dibber). B-406's code waits on DIB-35's release.
 
 B-401 comes first and builds nothing. B-402 and B-404 follow it, in parallel; B-403 needs B-402's
 record of the branch heads it relayed. B-120 can run beside all of them: its dependency on B-140
