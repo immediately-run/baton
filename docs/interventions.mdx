@@ -1064,3 +1064,33 @@ Entry shape: **When** · **Host** · **Tickets** · **Why it was needed** · **R
     release ticket after ticket (B-336 covers sandbox placement; this is the same shape).
   - A source-check failure is not "ticket moved under the claim"; it should not be released
     `stale-board`. *No ticket yet.*
+
+## 2026-11-28 10:15–11:50 — restart after a reboot; `main` red on two tickets without Invariants
+
+- **Host:** bering
+- **Tickets:** B-359 (#471, released), B-360 (in `implement`); B-366 and B-371 (the cause)
+- **Why it was needed:**
+  - **The restart.** bering rebooted about 10:12 local. The gateway, Embed and the flag stand-in
+    came back on their own. At the owner's word the runner was started at 10:15 in tmux window
+    `1`, session `run-20261128-101533-r1`, concurrency 1, from a scratchpad copy of
+    `start-runner.sh` that sets `BATON_CLI_PIN=d78f5339` after `runner.env`. `main`'s
+    `src/runner/legProcess.mjs` still imports `./legClient.mjs`, so the 2026-11-26 hold on the CLI
+    stands.
+  - **`main` is red.** `f560737f` filed B-359 to B-371, and B-366 and B-371 have no
+    `### Invariants` section, which `check.sections_from_id` (B-176) requires. `baton tickets
+    check` exits 1, so S-BTN-189 ("this repository's tickets pass the check") fails `npm test` on
+    `main` (`b630e6b8`) and on every branch from it.
+  - **What it cost.** B-359's `run-tests` came back red on that test alone. Its `fix` agent found
+    the cause, rightly changed nothing outside its ticket, and the claim ended
+    `released:cannot-finish:transient` at `pr-open`. Every create-pr ticket meets the same wall
+    until `main` is green.
+- **Resolution:**
+  - At the owner's word, this PR adds an Invariants section to B-366 and B-371, drawn from their
+    own text. `baton tickets check` reports no findings, and S-BTN-189 passes (it fails without
+    the change). The runner kept running.
+- **Autonomous handling:**
+  - A filing commit that leaves `baton tickets check` failing should not reach `main`: the
+    filing path could run the check before it pushes. *No ticket yet.*
+  - A `fix` leg that finds `main` itself red, with nothing to fix in its own ticket, could end
+    with a distinct reason, so the runner stops spending attempts on every ticket. *No ticket
+    yet.*
