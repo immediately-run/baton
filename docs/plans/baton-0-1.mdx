@@ -1,6 +1,6 @@
 ---
 title: "Plan — Baton 0.1: three days unattended"
-description: The owner's 0.1 release criterion (three days without an intervention, the runner working on the right tickets in order, following the course, at full capacity), the evidence of what still breaks it, the work in order with every ticket ranked, the decisions it needs from the owner, and what follows 0.1.
+description: The owner's 0.1 release criterion (three days without an intervention, the runner working on the right tickets in order, following the course, at full capacity), the evidence of what still breaks it, the work in four phases (the git proxy among them) with every ticket ranked, the decisions it needs from the owner, and what follows 0.1.
 tags: [plans]
 order: 63
 ---
@@ -98,19 +98,61 @@ read each against its PRs:
   B-336 (#464; the E2B executor's placement report waits on a Fieldhouse change). Both stay
   phase A work at ranks 25 and 50.
 
-B-311 (#348) in phase B is closed the same way, its open findings filed as B-394.
+B-311 (#348), in the selector phase of the first draft, is closed the same way, its open findings filed as B-394.
 
 After phase A has merged and deployed, B-366's **rehearsal**: 72 hours on bering, with every
 intervention logged and `baton report soak` read at the end. It releases nothing. Whatever it finds
-becomes a ticket ranked before phase B's remaining work.
+becomes a ticket ranked before phase B's and C's remaining work.
 
-### Phase B — the course says one thing
+### Phase B — one record of where a ticket is: the git proxy
+
+The owner, 2026-11-28: "The plan is to drop git forge sync which become unnecessary once we have
+the git proxy in place. This should be included in 0.1." The owner's rulings the same day:
+- the forge half of the sync goes; a thin reader of the ticket store stays;
+- Baton ships the proxy, for any forge or plain git; Fieldhouse's forge gate (FLDH-60, FLDH-61)
+  becomes this proxy plus Fieldhouse's credential and landing policy;
+- a merge that bypasses the proxy "does happen even when the whole team uses baton eg: to merge PRs
+  changing course leg logic", and "post merge, the changes are on main after all": one layer
+  detects it, a cursor walk over each default branch, its finds verified with the forge, with no
+  backstop sweep and no webhook in 0.1 (the owner, "do we need all 3 layers?", then "yes, rewrite
+  the plan, goal and B-374").
+
+Why it is 0.1 work: R-BTN-39 already says "No ticket file, marker, PR or snapshot places a ticket",
+but the code still lets the sync's station function place one (`src/core/stations.ts`, "git wins").
+That is how 33 tickets that were never delivered sit at `merged`, offered to no runner
+([#469](https://github.com/immediately-run/baton/pull/469); `docs/lessons.mdx`, 2026-11-27).
+Criterion 2 cannot hold while Baton's position is only as good as a reading of PR markers.
+
+| Rank | Ticket | What it does |
+|---|---|---|
+| 18 | B-374 | A ticket Baton holds at `merged` is closed in its store by a `close` leg; the 33 undelivered tickets are put back on the course |
+| 76 | B-401 | Specify the proxy: the relay, the fact reader's cursor walk (R-BTN-192), the sync's forge half retired |
+| 77 | B-406 | Tickets under Baton say `status: orchestrator`: closure only from Baton's record, Baton answers Dibber's status query, no leg writes a status (Dibber's half is DIB-35) |
+| 78 | B-120 | No snapshot places a ticket; owner adopt sets a position (R-BTN-39 built as written) |
+| 79 | B-402 | The proxy's relay: legs reach git and the forge only with per-claim tokens |
+| 81 | B-403 | The cursor walk: each new default-branch commit's PR found, verified with the forge, attested `pr-merged` |
+| 82 | B-404 | `create-pr` gains a `merged-by-hand` fact leg and a reconcile leg |
+| 83 | B-405 | The sync reads the ticket store only; Baton stops dispatching forge syncs |
+
+The owner, 2026-11-28, also: "Dibber tickets should use "status: orchestrator" when used with
+baton", the file staying `orchestrator` after Baton closes the ticket, and this in phase B. That
+removes the stale copy at the source: a file no longer says `available` or `done` for Baton to be
+contradicted by (B-406, with Dibber's DIB-35; `dibber edit`, DIB-34, lets the store's own fields
+change through Dibber). B-406's code waits on DIB-35's release.
+
+B-401 comes first and builds nothing. B-402 and B-404 follow it, in parallel; B-403 needs B-402's
+record of the branch heads it relayed. B-120 can run beside all of them: its dependency on B-140
+is only "for protected homes' fact legs", and this repository is `cooperative` (D9). B-405 comes
+last. B-120's rank and B-366's dependencies on this phase are set (D9).
+
+### Phase C — the course says one thing
 
 The selector design (R-BTN-205, B-351) landed in the spec on 2026-11-27. It replaces the
 mechanisms that disagreed with each other in phase A's evidence (the station function's readiness,
 the holder's `next`, posted next legs), with one function per course whose verdict says why. The
-owner ruled the same day that it is needed for Baton to be generally usable. Whether it belongs to
-0.1 is decision D2.
+owner ruled the same day that it is needed for Baton to be generally usable. It follows phase B,
+so a selector reads facts from where they will stay (the proxy's attestations), never from the
+sync's forge half. Whether it belongs to 0.1 is decision D2.
 
 | Rank | Ticket | What it does |
 |---|---|---|
@@ -121,7 +163,7 @@ owner ruled the same day that it is needed for Baton to be generally usable. Whe
 | 120 | B-354 | Host matching (the sandbox-memory case in the owner's brief) |
 | 125 | B-357 | The selector's budget, measured |
 
-### Phase C — the release
+### Phase D — the release
 
 | Rank | Ticket | What it does |
 |---|---|---|
@@ -134,9 +176,9 @@ Each has a default that this plan assumes until answered.
 - **D1 — The default order.** Today `to_end` (fewest legs to an end) decides before `order`.
   - (a) Keep it, and write it down (B-362, item 5). **Default.** Finishing in-flight work first keeps PRs from going stale.
   - (b) Put `order` first, so the most important ticket always goes first, even over finishing one that is nearly merged.
-- **D2 — Is the selector (phase B) in 0.1?**
+- **D2 — Is the selector (phase C) in 0.1?** Phase B is, by the owner's ruling of 2026-11-28.
   - (a) Yes. The release soak runs on the mechanism 0.1 ships, and phase A's rehearsal is the cheap early signal. **Default.**
-  - (b) No. Release on phase A alone, and the selector is 0.2's.
+  - (b) No. Release on phases A and B, and the selector is 0.2's.
 - **D3 — The pass thresholds for `baton report soak`.**
   - (a) Zero interventions, zero inversions, zero course deviations, idle capacity at most 5% of each runner's live time, no ticket stale for more than 24 hours. **Default.**
   - (b) Other numbers.
@@ -151,7 +193,7 @@ Each has a default that this plan assumes until answered.
   - (b) Mark them `deprioritized`, so no runner takes one before 0.1.
 - **D7 — Re-ranking existing tickets**, which Dibber 0.4.0 cannot do. **Answered**, the owner,
   2026-11-27: "Yes, hand-edit once". This plan's PR sets `order:` by hand on the 25 existing tickets
-  ranked here (phases A and B, and *Simpler* below); `dibber check` reports nothing new. B-362 gets
+  ranked here at the time (phase A, the selector phase, and *Simpler* below); `dibber check` reports nothing new. B-362 gets
   Dibber a re-rank command.
 - **D8 — The 91 tickets Baton holds at `merged` whose files say they are open.** **Answered**, the
   owner, 2026-11-27: (a), in its own PR. [#469](https://github.com/immediately-run/baton/pull/469)
@@ -159,6 +201,12 @@ Each has a default that this plan assumes until answered.
   B-400) for the findings left open, and files B-374 for the cause. The other 33 were never
   delivered (a filing, spec or partial PR merged), yet Baton holds them at `merged`, so no runner is
   offered them: B-374 asks for them to be put back on the course.
+
+- **D9 — Fitting B-120 and phase B into the ranks.** **Answered**, the owner, 2026-11-28: "Yes".
+  Set by hand, as D7's were: B-120's `order` is 78 and it no longer depends on B-140, which it
+  needs only for protected homes' fact legs; B-366 depends on B-120 and B-401 to B-405 as
+  well. B-374 joins B-366's dependencies once #469, which files it, has landed; the goal names it
+  meanwhile.
 
 ## Housekeeping found on the way
 

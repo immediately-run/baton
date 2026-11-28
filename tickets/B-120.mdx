@@ -8,15 +8,14 @@ repos:
   - baton
 tags:
   - roadmap-item
-order: 1095
+order: 78
 tier: judgement
 description: "Build Baton as the one authority on a ticket's course history and position, as the spec now states it (R-BTN-35, R-BTN-39, R-BTN-10, R-BTN-63, R-BTN-70, R-BTN-71, R-BTN-81, R-BTN-83, R-BTN-85; S-BTN-18, S-BTN-34, S-BTN-47, S-BTN-195; R-BTN-191 and the one inbound path, folded in from B-151): no snapshot places a ticket; fact arrivals only on person legs and legs declaring arrives (under protected, attested by the fact reader, R-BTN-192, B-140); the sync reads positions in its observation; regression detection retired; confirmation by evidence; and baton owner ticket adopt for legs done outside Baton. Requires: none."
 topics:
   - baton
 owns: {}
 prs: []
-depends_on:
-  - B-140
+depends_on: []
 ---
 
 **Brief:** the owner, 2026-10-26, verbatim: "blindly accepting git updates as tickets status in
@@ -45,7 +44,9 @@ and `create-spec`'s interactive legs write no machine state), [§9](../spec/BATO
 `docs/context/vocabulary.mdx` (*Path*, *Confirmation*, *Adopt*) is amended with it; values
 and architecture already say it (2026-10-28).
 
-**Depends on:** B-140 (the fact reader, R-BTN-192), for protected homes' fact legs.
+**Depends on:** none.
+
+**Related:** B-140 (the fact reader, R-BTN-192), needed only for protected homes' fact legs; a `cooperative` home, this repository among them, does not wait on it (the owner, 2026-11-28, decision D9 of the 0.1 plan).
 
 ### The choices (the owner, 2026-10-31)
 
@@ -140,3 +141,5 @@ _(2026-11-02: the spec restructure's part 3 (B-166, the PR `spec-restructure-han
 _(2026-11-20: the spec simplification of 2026-11-19 (baton#299; `spec/BATON_SPEC_HISTORY.md`, that date) moved the unbuilt parts of the design this ticket builds out of the section files, with their rule ids, to proposal pages: the owner's `adopt` is [the ticket-adopt proposal](../spec/proposals/ticket-adopt.md); fact legs and the fact reader are part 4 of [the courses proposal](../spec/proposals/courses.md) and part 6 of [the security proposal](../spec/proposals/security.md); the sync's and the holder's attestations are part 5 of the security proposal; the routes are under "Other reads and owner routes" in [the tables-and-routes proposal](../spec/proposals/data-model-and-api.md). S-BTN-195 and S-BTN-187 are no longer rows of the verification section: they are in [the proposals' scenarios](../spec/proposals/scenarios.md), under "The repository policy's enforcement". S-BTN-18 stays in the verification section, cut to what is built, with its unbuilt part on that page too. Each rule keeps its id and a line in its section, which links the page. The pull request that builds this ticket moves the rules it builds back into the section files, and the scenarios and gates it makes pass back into [the verification section](../spec/BATON_SPEC/15-verification.md#sec-15), in the same change. The plan above is otherwise as the earlier note of this day leaves it.)_
 
 _(2026-11-27: rules re-read: R-BTN-70, R-BTN-74, R-BTN-83, R-BTN-89. R-BTN-205 (B-351) moves the choice of the next leg to the course's selector: the clauses that built readiness, the holder's `next` and posted `not_before`, which it retires, are rewritten in place; a migrated queued leg is `next_source: baton`; B-356 removes the old code.)_
+
+_2026-11-28: in 0.1's phase B at rank 78, and no longer waiting on B-140 (decision D9 of [the 0.1 plan](../docs/plans/baton-0-1.mdx), the owner: "Yes"); `order` and `depends_on` set by hand, Dibber 0.4.0 refusing both after filing._

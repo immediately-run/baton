@@ -1,0 +1,54 @@
+---
+id: B-406
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-406 — Tickets under Baton say status: orchestrator: closure comes from Baton's record, Baton answers Dibber's status query, and no leg writes a status"
+depends_on: []
+order: 77
+tags: [roadmap-item]
+project: baton
+description: "Baton's half of DIB-35: the markdown source reads orchestrator as live and takes closure only from Baton's record (a file's withdrawal still closes), baton tickets status answers Dibber's coordinator query, legs stop writing status, and this repository migrates."
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-28 (in a Claude Code session): "Dibber tickets should use "status: orchestrator" when used with baton." Asked what a file says once Baton closes the ticket: it stays `orchestrator`; closure lives only in Baton, and withdrawals stay the store's to write. Asked whether this is 0.1 work: yes, in phase B of [the 0.1 plan](../docs/plans/baton-0-1.mdx). Dibber's half is [DIB-35](https://github.com/immediately-run/dibber/blob/main/tickets/DIB-35.md).
+
+**Spec:** [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2): the ticket source, `closed` and `display.status`), [R-BTN-39](../spec/BATON_SPEC/01-what-baton-is.md#sec-1) (Baton's record is the position), [R-BTN-199](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-3) (Dibber's coordinator); the ticket-ownership proposal's field table (`spec/proposals/ticket-ownership.md`: closure at an end station is Baton's, withdrawal the store's).
+
+**Depends on:** none.
+
+**Related:** DIB-35 (the status and the coordinator status query; this ticket's code waits on its release, and Baton's Dibber pin moves to it), DIB-34 (`dibber edit`), B-374 (the close leg, which writes no status once this lands), B-120.
+
+### Why
+
+A Dibber ticket's `status` is a second copy of what Baton records, and it goes stale: on 2026-11-27, 93 tickets Baton held at `merged` still said `available`, `in-review` or `in-progress` in their files (`docs/interventions.mdx`, `docs/lessons.mdx`). People and agents read the copy (the 0.1 plan ranked six finished tickets from it), and Baton's markdown source reads it too: `CLOSED` in `src/defaults/tickets-markdown.ts` takes a file's `done` as the ticket's closure, though closure at an end station is Baton's.
+
+### What to build
+
+1. **The markdown source reads `orchestrator` as live**, and takes no closure from a file except a withdrawal (`withdrawn`, `superseded`, `deferred`, posted in `closed` as today). A ticket closes when Baton's record says it reached an end station, never because its file says `done`. Amend R-BTN-74 to say so.
+2. **Baton answers Dibber's status query.** `baton tickets status <ids> --coordinator` prints each ticket's state as Baton holds it (its station, ticket state word, closed or not) in DIB-35's shape; `baton repo init` writes it into `.dibber/config.json` beside `coordinator.next`, and writes `status: orchestrator` as the default for new tickets.
+3. **No leg writes a status.** The standard courses' stubs stop setting `status:` (the merge leg's *Close the ticket*, the marker legs' closes, `dibber done` and `dibber set` calls); `AGENTS.md` and `CLAUDE.md` stop telling sessions to claim or close with Dibber, and say to claim through Baton.
+4. **This repository migrates.** After Baton's Dibber pin moves to DIB-35's release, `dibber migrate --to-orchestrator` over `tickets/`, committed in this ticket's PR; `npm run check:wiki`'s rule that a done ticket belongs in `tickets/archive/` is retired, since no ticket here is marked done any more (Dibber's R-DIB-2 already says nothing moves into an archive).
+5. **The dashboard and `baton board`** show Baton's state for a ticket, never its file's status.
+
+### Exit criteria
+
+- A sync over a store of `orchestrator` tickets posts them all live; one whose file says `withdrawn` closes as withdrawn; one Baton holds at an end station reads closed on the board with its file unchanged.
+- `baton tickets status B-1 --coordinator` answers in DIB-35's shape; `dibber list` in this repository shows Baton's states through it.
+- No stub or leg instruction writes `status:` (a test greps the generated stubs).
+- `tickets/` migrated; `npm run check:wiki`, `dibber check`, `npm test` and `npm run typecheck` green; each behaviour named in a scenario.
+
+### Trust
+
+Removes an input: a pusher can no longer close a ticket in Baton by writing `done` in its file. A withdrawal written in the file still closes it, as the ownership table gives withdrawal to the store.
+
+### Invariants
+
+- R-BTN-39: Baton's record is the position, closure at an end station included.
+- The store's own fields (body, title, relations, withdrawal) stay the store's.
+
+## Status
+
+_filed 2026-11-28._

@@ -1,0 +1,57 @@
+---
+id: B-401
+status: available
+topics: [baton]
+owns: {}
+prs: []
+title: "B-401 — Specify Baton's git proxy: legs reach git and the forge only through it, it is the fact reader, and the sync's forge half retires"
+depends_on: []
+order: 76
+tags: [roadmap-item]
+project: baton
+description: "A spec PR: a Baton-shipped proxy holds the forge credential and relays every leg's git and forge traffic under per-claim grants; it walks each default branch from a cursor and attests pr-merged once the forge confirms the PR, so the sync keeps only the ticket store."
+repos: [baton]
+---
+
+**Brief:** the owner, 2026-11-28 (in a Claude Code session): "The plan is to drop git forge sync which become unnecessary once we have the git proxy in place. This should be included in 0.1." Asked which part, the owner chose the forge half only (a thin ticket-store reader stays); asked who ships the proxy, "Baton ships it"; on moves that bypass the proxy: "By design, this should be infrequent, but it does happen even when the whole team uses baton eg: to merge PRs changing course leg logic. I would prefer a forge specific webhook if possible, but a sync action (like today) run infrequently is also a solution, or inspecting git tree state - post merge, the changes are on main after all."; and then: "If even squashed merges refer to their PRs in the merge commit message (a reference baton / fieldhouse can verify with the forge), then do we need all 3 layers?" The design below is the one-layer answer the owner accepted ("yes, rewrite the plan, goal and B-374"). The plan is [Baton 0.1](../docs/plans/baton-0-1.mdx), phase B.
+
+**Spec:** [BATON_SPEC §3](../spec/BATON_SPEC/03-repositories-and-forges.md) (a new subsection for the proxy; [R-BTN-139](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-4), the fact adapter; [R-BTN-94](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3) and [R-BTN-73](../spec/BATON_SPEC/03-repositories-and-forges.md#sec-3-3), dispatches and forge notifications), [BATON_SPEC §4.2](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2) ([R-BTN-74](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2): the sync; [R-BTN-203](../spec/BATON_SPEC/04-tickets-syncs-board.md#sec-4-2): outside moves), [BATON_SPEC §12.8](../spec/BATON_SPEC/12-security.md#sec-12-8) ([R-BTN-192](../spec/BATON_SPEC/12-security.md#sec-12-8): the fact reader, proposed; the deployment's duty), [BATON_SPEC §8.4](../spec/BATON_SPEC/08-runners.md#sec-8-4) ([R-BTN-144](../spec/BATON_SPEC/08-runners.md#sec-8-4): a leg's credentials); `docs/context/architecture.mdx` (*One inbound path*, *One outbound path*).
+
+**Depends on:** none.
+
+**Related:** B-120 (no snapshot places a ticket), B-131 (per-claim forge credentials, which the proxy's grants make), B-140 (the merge runner, whose fact-reader mode this replaces), Fieldhouse's forge gate (FLDH-60, FLDH-61), which becomes this proxy plus Fieldhouse's own credential and landing policy.
+
+### Why
+
+Baton learns where a ticket is from two places that disagree: its own record, and a sync whose station function reads forge facts and PR markers and posts a position. The second is what placed 33 undelivered tickets at `merged` (B-374; `docs/lessons.mdx`, 2026-11-27), and R-BTN-39 already forbids it: "No ticket file, marker, PR or snapshot places a ticket." Once every leg reaches git and the forge through a proxy Baton ships, the forge half of the sync has nothing left to do: the proxy relays the work, and the same proxy reads what merged.
+
+### What to specify
+
+A spec PR, building nothing. It states the design below in its owning rules, marks each `specified` with the build tickets, and moves R-BTN-192's design off the security proposal page.
+
+1. **The proxy.** A Baton component, run by a deployment beside its runners, for any forge or plain git. It holds the forge credential; no leg and no runner does. A leg reaches git (smart HTTP) and the forge's REST API only through it, with a token the runner's executor obtains per claim, scoped to the claim's repositories and the ticket's branches. It refuses everything else. Fieldhouse's forge gate is this proxy with Fieldhouse's credential and landing policy added; its landing gate stays Fieldhouse's.
+2. **The proxy is the fact reader (R-BTN-192).** It walks each registered repository's default branch from a stored cursor, the last commit it processed. For each new commit it finds the PR the commit came from, in order: the commit's ancestry contains a leg branch head it relayed under a claim's grant (a merge commit); the message's PR reference (a squash commit's `(#N)`); the forge's commit-to-PR lookup (an edited message, a rebase merge). It then verifies with the forge that the PR merged, that its merge commit is this commit, that its base is the default branch and that its head is a branch a claim pushed. Only then does it attest `std:arrival@1` (`pr-merged`) as its `service:` key. A commit with no such PR attests nothing. On plain git only the first step applies.
+3. **Why one layer suffices.** The cursor walk misses nothing (a proxy that was down resumes from its cursor; the deployment's duty refuses history rewrites on the default branch), so no backstop sweep is specified. A webhook would only make detection faster; it is left out, and the proxy checks the default branch's head with a cheap ref read about once a minute. Values #6 holds: git, the message and a ref change are hints of where to look, and the forge's answer, read with the proxy's credential, is the fact.
+4. **The sync keeps only the ticket store.** R-BTN-74's sync reads the ticket source and posts tickets; the fact adapter (R-BTN-139) moves into the proxy; the station function places nothing (B-120) and reads no forge facts. R-BTN-94's dispatches for forge reasons, and the forge notifications that triggered them (R-BTN-73), are retired with the forge half.
+5. **Outside moves stay modelled by the course.** A merge that bypasses the proxy (a person merging a course or workflow change at the forge) still lands on the default branch, so the walk sees it; the ticket arrives along its course's fact leg (`merged-by-hand`) or, where the course declares none, is kept as evidence for its reconcile leg (R-BTN-203, values #13).
+6. **Amendments**, each named in the PR: the architecture page's *One inbound path* (the proxy is a writer) and *One outbound path* (the proxy holds the forge credential, not Baton's server); §12.8's duty (the forge lets only the proxy's identity and the human identity land on the default branch); R-BTN-144 (a leg's forge credential is the proxy token); the vocabulary (*Proxy*).
+
+### Exit criteria
+
+- BATON_SPEC states items 1 to 6 in their owning rules, with `npm run spec:index` run, and the history entry quotes the owner's rulings above.
+- `npm run check:spec`, `npm run check:wiki` and `node scripts/link-spec-refs.mjs --check` green.
+- The build tickets this design needs that the plan does not already list are filed with Dibber, each with an `order`.
+
+### Trust
+
+A spec change. It moves the forge credential from runners and legs to one service, and the forge facts' writer from the sync to that service's key.
+
+### Invariants
+
+- R-BTN-39: no ticket file, marker, PR or snapshot places a ticket.
+- Values #6: nothing in a webhook, a ref or a commit message is trusted beyond "look here".
+- Values #8: the proxy works on plain git, by ancestry alone.
+
+## Status
+
+_filed 2026-11-28._

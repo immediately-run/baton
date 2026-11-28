@@ -5,11 +5,11 @@ topics: [baton]
 owns: {}
 prs: []
 title: "B-366 — [OP] Baton 0.1: a 72-hour rehearsal after phase A, then a 72-hour release soak that baton report soak passes, then the 0.1 tag"
-depends_on: [B-324, B-359, B-360, B-244, B-361, B-318, B-362, B-363, B-336, B-365, B-347, B-337, B-364, B-368, B-249, B-352, B-353, B-356, B-355, B-354, B-357, B-311]
+depends_on: [B-324, B-359, B-360, B-244, B-361, B-318, B-362, B-363, B-336, B-365, B-347, B-337, B-364, B-368, B-249, B-120, B-401, B-402, B-403, B-404, B-405, B-352, B-353, B-356, B-355, B-354, B-357, B-311]
 order: 150
 tags: [roadmap-item]
 project: baton
-description: An operator ticket. Rehearse after phase A and file what it finds; run a fresh 72-hour window with no change to host, grants or course once phases A and B have landed; release when baton report soak prints PASS and no intervention is logged, as B-135 says releases are made.
+description: An operator ticket. Rehearse after phase A and file what it finds; run a fresh 72-hour window with no change to host, grants or course once phases A to C have landed; release when baton report soak prints PASS and no intervention is logged, as B-135 says releases are made.
 repos: [baton]
 ---
 
@@ -17,9 +17,9 @@ repos: [baton]
 
 **Spec:** none changes.
 
-**Depends on:** B-324, B-359, B-360, B-244, B-361, B-318, B-362, B-363, B-336, B-365, B-347, B-337, B-364, B-368, B-249, B-352, B-353, B-356, B-355, B-354, B-357, B-311.
+**Depends on:** B-324, B-359, B-360, B-244, B-361, B-318, B-362, B-363, B-336, B-365, B-347, B-337, B-364, B-368, B-249, B-120, B-401, B-402, B-403, B-404, B-405, B-352, B-353, B-356, B-355, B-354, B-357, B-311.
 
-**Related:** these are phases A and B of the plan; phase B is in the release only while decision D2 stands at (a), its default.
+**Related:** these are phases A to C of the plan; phase C (the selector) is in the release only while decision D2 stands at (a), its default.
 
 ### What to do
 
@@ -42,3 +42,5 @@ The release is a human act (B-135). No runner tags, publishes or changes a grant
 ## Status
 
 _filed 2026-11-27._
+
+_2026-11-28: depends on phase B, the git proxy (B-120, B-401 to B-405) (decision D9 of [the 0.1 plan](../docs/plans/baton-0-1.mdx), the owner: "Yes"); `depends_on` set by hand, Dibber 0.4.0 refusing it after filing._
