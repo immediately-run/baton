@@ -18,7 +18,7 @@ import { useRead } from '../../lib/reads';
 import { Text, textOf } from '../../lib/Text';
 import { Band, Empty, NotBuiltNote, PageHeader, Pager, RelTime, Section, usePager, type Tone } from '../../lib/ui';
 import type { ScreenProps } from '../contract';
-import { CardTable, KindMark, kindOf, Options, QUESTION_KIND, QuestionLink, queryOf, Restarts, Severity, TicketLink, withQuery, type Kind } from './kit';
+import { CardTable, KindMark, kindOf, Options, QUESTION_KIND, QuestionLink, queryOf, Restarts, Severity, TicketLink, withQuery, type Kind, UnrankedDetail } from './kit';
 import type { Condition, ConditionsPage, ListingRow, NeedsYou, Question } from './types';
 
 /** V1's Needs-you listings (B-57 makes each a condition), by the name the read serves them
@@ -131,6 +131,7 @@ function ConditionRow({ condition, repository }: { condition: Condition; reposit
           <span>raised <RelTime at={condition.raised_at} /></span>
           {!interact && condition.url ? <ExtLink href={condition.url} showHost>where it is asked</ExtLink> : null}
         </div>
+        <UnrankedDetail condition={condition} repository={repository} />
         <Restarts condition={condition} />
       </div>
       <div className="needs-act">

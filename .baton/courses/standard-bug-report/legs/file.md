@@ -21,7 +21,7 @@ ticket for the fix exists and the bug ticket names it.
 Ticket files are Dibber's to write: file and change them with `$BATON_DIBBER` (the `dibber` your stub pins: run it exactly as that variable says, never another), never by hand.
 
 - Write the body to a file outside the checkout, then file it:
-  `$BATON_DIBBER new --title "…" --body-file <that file>`, adding `--depends-on`, `--tags` and
+  `$BATON_DIBBER new --title "…" --body-file <that file> --order N`, adding `--depends-on`, `--tags` and
   `--field key=value` for any other frontmatter key. Dibber takes the id from Baton's sequence
   through `.dibber/config.json`'s coordinator (R-BTN-131); if it refuses because Baton gave no
   number, stop and say so — never `--offline`, never an id of your own. Its course is the
@@ -51,3 +51,6 @@ Your work lands under the ticket's own `## file` heading — write it if it is n
 ## Do not
 
 - Fix the bug here. The fix is the new ticket's work.
+
+Before filing, compute `N` in the ticket store checkout with `baton tickets filing-order`,
+passing the parent ticket id if the new ticket is a child.

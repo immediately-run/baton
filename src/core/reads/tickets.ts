@@ -34,6 +34,16 @@ function ticketsAnswer(cx: ReadCtx, call: ReadCall): TicketsAnswer {
   if (after != null && !(typeof after === 'object' && typeof after.id === 'string' && Number.isInteger(after.n))) throw new BatonError('invalid-params', 'cursor: not a cursor of this read');
 
   const all = ticketRows(cx, repo, call.sessionLink);
+  if (call.runnerId != null) {
+    const offered = cx.core.claims.offerOrder(call.runnerId);
+    for (const row of all) if (row.state === 'ready') {
+      const order = offered.get(row.ticket_id);
+      row.ready_position = order?.position ?? null;
+      if (order) row.offer_order = order;
+    }
+    // Ready rows already precede the rest; sort by the verified runner's actual place.
+    all.sort((a, b) => (a.ready_position ?? Infinity) - (b.ready_position ?? Infinity));
+  }
   const needle = q.q?.toLowerCase() ?? null;
   const matched = all.filter((r) =>
     (!states || states.includes(r.state))

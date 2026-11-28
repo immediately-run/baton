@@ -14,7 +14,7 @@ import type { ReadRoute } from './kit';
 const legacy = (action: string, over: Partial<ReadRoute> = {}): ReadRoute => ({
   action,
   clock: true,
-  run: async (cx, call) => (await repositoryRead(cx.core, call.req, call.url, call.repository!, call.principal, call.sessionLink))
+  run: async (cx, call) => (await repositoryRead(cx.core, call.req, call.url, call.repository!, call.principal, call.sessionLink, call.runnerId))
     ?? (() => { throw new BatonError('not-found', `no route GET ${call.url.pathname}`); })(),
   ...over,
 });

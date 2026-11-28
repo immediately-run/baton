@@ -201,6 +201,7 @@ async function readBoard(root: string, at: string, batonJson: BatonJson, args: S
     result = await mod.default.tickets(ctx);
   } else {
     result = stampMarkdownVersions(root, ticketsMarkdown(readItems(root, settings.items), settings), settings.items);
+    for (const t of result.tickets) if (t.rank == null) log(`baton.unranked: ${t.id} (${t.path}) has no order`);
   }
   const closedIds = new Set(result.closed.map((c) => c.id));
   const doneIds = new Set(result.closed.filter((c) => c.as === 'done').map((c) => c.id));

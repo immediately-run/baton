@@ -18,6 +18,8 @@ export interface TicketRow {
   requires_unmet?: string[];
   tags?: string[];
   order?: string | null;
+  rank?: number | null;
+  ready_position?: number | null;
   parent?: string | null;
   expedite?: boolean;
   position: { station: string; path_len?: number; next_leg: string | null; next_source?: string | null } | null;

@@ -125,6 +125,10 @@ numbers.
 
     Other fields are ignored. Two files with one `id`, a `repos` name with no mapping, or an
     `order` that is not a number fail the sync: nothing is posted and the run names the file.
+    The default markdown sync names each live ticket with no order in its output. An accepted
+    markdown ticket reading with any missing ranks raises one repository `baton.unranked` notice
+    (R-BTN-163), with their count and up to 50 local ids; it closes when none remain. This never
+    changes eligibility or order.
   - **`baton ticket check [--repo DIR] [--quiet]`** (R-BTN-127) reads the source as a sync does
     and checks what it would post. It never posts or writes. Exit 1 with one `path: message`
     line per finding, 0 with none, 2 for an unreadable root or a malformed `baton.json`. The

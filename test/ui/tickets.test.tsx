@@ -66,7 +66,7 @@ describe('the Tickets table (B-209 item 2)', () => {
     serve();
     renderApp('/repositories/docs/tickets');
     const table = await screen.findByRole('table', { name: 'Tickets' });
-    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Ticket', 'State', 'Position', 'Requires']);
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Ticket', 'State', 'Rank', 'Position', 'Requires']);
     // The order is the read's: no row is moved.
     expect([...table.querySelectorAll('tr.tk-row th')].map((th) => th.textContent!.split(' ')[0])).toEqual(ROWS.map((r) => r.ticket_id));
     for (const r of ROWS) {

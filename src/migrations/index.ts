@@ -57,6 +57,7 @@ import legTimeoutFence from './0082_leg_timeout_fence.sql';
 import courseSourceResolutions from './0143_course_source_resolutions.sql';
 import forgeScopeDeadline from './0144_forge_scope_deadline.sql';
 import syncProtocol from './0145_sync_protocol.sql';
+import unranked from './0146_unranked.sql';
 import eventLookups from './0049_event_lookups.sql';
 import alarmIndexes from './0052_alarm_indexes.sql';
 import retention from './0053_retention.sql';
@@ -267,4 +268,5 @@ export const MIGRATIONS: Migration[] = [
   { id: 143, sql: courseSourceResolutions },
   { id: 144, sql: forgeScopeDeadline },
   { id: 145, sql: syncProtocol },
+  { id: 146, sql: unranked },
 ];

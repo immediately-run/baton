@@ -25,7 +25,7 @@ If the request's `status:` is `withdrawn`, the owner decided against filing: fil
 write nothing, and stop.
 
 For each draft, file a ticket with `$BATON_DIBBER` (the `dibber` your stub pins: run it exactly as that variable says, never another):
-`$BATON_DIBBER new --title "…" --body-file <the draft's body, in a file outside the checkout>`,
+`$BATON_DIBBER new --title "…" --body-file <the draft's body, in a file outside the checkout> --order N`,
 with the options below. Never write a ticket file by hand.
 
 - **id** Dibber's: it takes the next number from Baton's sequence through `.dibber/config.json`'s
@@ -47,3 +47,6 @@ Your work lands under the ticket's own `## file` heading — write it if it is n
 ## Do not
 
 - Re-plan the set, edit the spec, or leave a draft unfiled.
+
+Before filing, compute `N` in the ticket store checkout with `baton tickets filing-order`,
+passing the parent ticket id if the new ticket is a child.

@@ -40,6 +40,7 @@ const CORE_KINDS: [type: string, kind: Kind][] = [
   ['hitl', { name: 'Waiting on a person', glyph: '▲', tone: 'warn' }],
   ['baton.retries', { name: 'Retries exhausted', glyph: '■', tone: 'bad' }],
   ['baton.contract', { name: 'Contract refused', glyph: '■', tone: 'bad' }],
+  ['baton.unranked', { name: 'Tickets missing a rank', glyph: '▲', tone: 'warn' }],
   ['baton.stalled', { name: 'Stalled', glyph: '▲', tone: 'warn' }],
   ['error', { name: 'Error', glyph: '■', tone: 'bad' }],
   ['warning', { name: 'Warning', glyph: '▲', tone: 'warn' }],
@@ -51,6 +52,14 @@ export function kindOf(c: Pick<Condition, 'type' | 'disposition'>): Kind {
   const type = textOf(c.type);
   for (const [t, kind] of CORE_KINDS) if (type === t || type.startsWith(`${t}.`)) return kind;
   return c.disposition === 'suspend' ? { name: null, glyph: '▲', tone: 'warn' } : { name: null, glyph: '○', tone: 'mut' };
+}
+
+export function UnrankedDetail({ condition, repository }: { condition: Condition; repository: string }) {
+  const detail = condition.detail;
+  if (condition.type !== 'baton.unranked' || typeof detail?.count !== 'number' || !Array.isArray(detail.ids)) return null;
+  return <p><Text value={detail.count} /> open tickets have no order: {detail.ids.map((id, i) => (
+    <span key={id}>{i ? ', ' : ''}<TicketLink id={id} repository={repository} /></span>
+  ))}{detail.count > detail.ids.length ? ', and more' : ''}. Set their order in the ticket store to clear this notice.</p>;
 }
 
 /** A queued person leg's kind. */

@@ -156,6 +156,14 @@ same name, in its own checkout. This repository may get none. The body, in this 
 Then add every PR's URL to the ticket's `prs:` list if the ticket keeps one. Baton reads the PRs
 of every repository the ticket names, and reads them together, as one change.
 
+## Filing follow-ups
+
+If the work calls for filing a new ticket, in the ticket store checkout run
+`baton tickets filing-order <parent id>` for a child or `baton tickets filing-order` otherwise.
+Pass the number it prints as `--order N` to `$BATON_DIBBER new`; also pass `--parent` for a
+child. The command inherits the parent's order or uses the median of ranked open tickets
+(`0` if none are ranked).
+
 ## Do not
 
 - A leg never edits a file another ticket's leg may edit — no CHANGELOG, no index, no

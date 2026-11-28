@@ -157,8 +157,8 @@ describe('the retired verbs (B-326, S-BTN-189)', () => {
     }
     expect(f.head().sha).toBe(before);
     expect(fmOf(f, 'tickets/B-1.mdx').status).toBe('available');
-    // A verb the CLI never had names the two it keeps.
-    expect(run(f.dir, 'grab', 'B-1').err).toBe('baton: grab: baton tickets next|check (baton tickets --help)\n');
+    // A verb the CLI never had names the supported commands.
+    expect(run(f.dir, 'grab', 'B-1').err).toBe('baton: grab: baton tickets next|check|order|filing-order (baton tickets --help)\n');
     expect(run(f.dir, '--help').out).toContain('baton tickets check <id> --claimable');
   }, 30_000);
 });

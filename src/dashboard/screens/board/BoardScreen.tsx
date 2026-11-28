@@ -35,6 +35,7 @@ function ReadyRow({ row, repository }: { row: TicketRow; repository: string }) {
   return (
     <tr className="tk-row">
       <th scope="row" className="tk-id"><TicketCell row={row} repository={repository} />{row.expedite ? <span className="chip tk-flag">expedite</span> : null}</th>
+      <td data-label="Rank"><Text value={row.rank ?? 'Unranked'} />{row.ready_position != null ? <> · ready #{row.ready_position}</> : null}</td>
       <td data-label="Requires"><Chips names={row.requires ?? []} unmet={row.requires_unmet} empty="none" /></td>
       <td data-label="Who can take it">
         {runners === null ? <span className="mut">—</span>
@@ -54,6 +55,7 @@ function RunningRow({ row, repository }: { row: TicketRow; repository: string })
   return (
     <tr className="tk-row">
       <th scope="row" className="tk-id"><TicketCell row={row} repository={repository} /></th>
+      <td data-label="Rank"><Text value={row.rank ?? 'Unranked'} /></td>
       <td data-label="Runner"><RunnerLink runner={{ runner_id: d.runner_id as number, hostname: d.hostname as string, session_name: d.session_name as string }} repository={repository} /></td>
       <td data-label="Leg">{d.leg != null ? <Text mono value={d.leg} /> : <span className="mut">—</span>}</td>
       <td data-label="Leg page">{d.session_url
@@ -85,13 +87,13 @@ export function BoardScreen({ params }: ScreenProps) {
   return (
     <>
       <PageHeader title="Board" sub="The repository as it stands: what is running, and what is ready, in Baton’s order." />
-      <Section title="Ready" count={ready.first.data ? ready.rows.length : undefined} hint="In the order Baton offers them">
+      <Section title="Ready" count={ready.first.data ? ready.rows.length : undefined} hint="Repository queue; actual offers depend on the runner">
         {board.error && !board.data ? <ErrorNote error={board.error} what="The board read" /> : null}
         <Gate pages={ready}>
           {() => (ready.rows.length === 0 ? <Empty>No ticket is ready.</Empty> : (
             <div className="table-wrap tk-wrap">
               <table className="table tk-table bd-ready" aria-label="Ready tickets">
-                <thead><tr><th scope="col">Ticket</th><th scope="col">Requires</th><th scope="col">Who can take it</th></tr></thead>
+                <thead><tr><th scope="col">Ticket</th><th scope="col">Rank</th><th scope="col">Requires</th><th scope="col">Who can take it</th></tr></thead>
                 <tbody>{ready.rows.map((row) => <ReadyRow key={row.ticket_id} row={row} repository={repo} />)}</tbody>
               </table>
             </div>
@@ -104,7 +106,7 @@ export function BoardScreen({ params }: ScreenProps) {
           {() => (running.rows.length === 0 ? <Empty>No ticket is claimed.</Empty> : (
             <div className="table-wrap tk-wrap">
               <table className="table tk-table bd-running" aria-label="Running tickets">
-                <thead><tr><th scope="col">Ticket</th><th scope="col">Runner</th><th scope="col">Leg</th><th scope="col">Leg page</th><th scope="col">Running for</th><th scope="col">Lease</th><th scope="col">Notes</th></tr></thead>
+                <thead><tr><th scope="col">Ticket</th><th scope="col">Rank</th><th scope="col">Runner</th><th scope="col">Leg</th><th scope="col">Leg page</th><th scope="col">Running for</th><th scope="col">Lease</th><th scope="col">Notes</th></tr></thead>
                 <tbody>{running.rows.map((row) => <RunningRow key={row.ticket_id} row={row} repository={repo} />)}</tbody>
               </table>
             </div>

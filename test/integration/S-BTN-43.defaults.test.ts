@@ -55,12 +55,13 @@ class DefaultsBoard extends GitRepo {
 
   commit(message = 'wiki'): string { return super.commit(message); }
   /** One sync: recorded facts, the harness's sync credential, the local host's transport. */
+  logs: string[] = [];
   async sync(...extra: string[]): Promise<void> {
     const facts = join(this.dir, '.baton', 'facts.json');
     writeFileSync(facts, JSON.stringify(this.facts));
     const token = await syncToken();
     const args = parseSyncArgs(['--root', this.dir, '--url', ORIGIN, '--facts', facts, ...extra], {});
-    await syncMain({ ...args, auth: () => ({ Authorization: `Bearer ${token}` }), transport: (req) => hostCall(req), log: () => {} });
+    await syncMain({ ...args, auth: () => ({ Authorization: `Bearer ${token}` }), transport: (req) => hostCall(req), log: (line) => this.logs.push(line) });
   }
 }
 
@@ -133,6 +134,34 @@ async function recorded(...gates: Gate[]): Promise<void> {
 }
 
 describe('S-BTN-43 a repository with no course code', () => {
+  it('names unranked open tickets, updates one advisory condition and closes it when ranked', async () => {
+    await init(repo.dir, '--own');
+    for (let i = 10; i < 61; i++) repo.write(`tickets/extra-${i}.md`, `---\nid: T-${i}\n---\n`);
+    repo.commit();
+    await repo.sync();
+    const list = async () => (await rows<{ id: number; outcome: string; unranked_json: string }>(
+      "SELECT id, outcome, unranked_json FROM conditions WHERE repository_id = 'docs' AND type = 'baton.unranked'",
+    )).map(({ unranked_json, ...r }) => ({ ...r, detail: JSON.parse(unranked_json) }));
+    const first = await list();
+    expect(first).toEqual([{ id: expect.any(Number), outcome: 'open', detail: { count: 54, ids: expect.arrayContaining(['T-1']) } }]);
+    expect(first[0].detail.ids).toHaveLength(50);
+    const warnings = repo.logs.filter((line) => line.includes('baton.unranked:'));
+    expect(warnings).toHaveLength(54);
+    expect(warnings).toContain('baton.unranked: T-1 (tickets/first.md) has no order');
+    expect(await recommendable('T-1')).not.toEqual([]);
+
+    repo.write('tickets/first.md', '---\nid: T-1\norder: 0\n---\n');
+    repo.commit();
+    await repo.sync();
+    expect(await list()).toEqual([{ id: first[0].id, outcome: 'open', detail: { count: 53, ids: expect.not.arrayContaining(['T-1']) } }]);
+    repo.write('tickets/second.md', '---\nid: T-2\norder: 2\n---\n');
+    repo.write('tickets/third.md', '---\nid: T-3\norder: 3\n---\n');
+    for (let i = 10; i < 61; i++) repo.write(`tickets/extra-${i}.md`, `---\nid: T-${i}\norder: ${i}\n---\n`);
+    repo.commit();
+    await repo.sync();
+    expect(await list()).toEqual([expect.objectContaining({ id: first[0].id, outcome: 'closed' })]);
+  });
+
   it('init then sync: four tickets on the pr course, the dependent not ready, the timeline to merged', async () => {
     expect(await init(repo.dir, '--own')).toBe(0);
     keepLegacyPrPlacement(repo.dir);

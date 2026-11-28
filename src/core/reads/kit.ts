@@ -33,6 +33,7 @@ export type ReadCtx = {
 export type ReadCall = {
   action: Action;
   sessionLink: SessionLinkView;
+  runnerId?: number;
   /** A dashboard session or the authorized R-BTN-195 delivery poll. */
   showInteractionLinks: boolean;
   principal: ReadPrincipal;

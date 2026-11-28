@@ -3,7 +3,7 @@
 // unknown field ignored, a duplicate id and an unmapped repos name refused loudly. Pure and
 // host-neutral.
 import { describe, it, expect } from 'vitest';
-import { parseFrontmatter, ticketsMarkdown, type MarkdownFile } from '../../src/defaults/tickets-markdown';
+import { filingOrder, parseFrontmatter, ticketsMarkdown, type MarkdownFile } from '../../src/defaults/tickets-markdown';
 
 const file = (path: string, fm: string, body = 'prose\n'): MarkdownFile => ({ path, text: `---\n${fm}\n---\n\n${body}` });
 
@@ -98,4 +98,14 @@ describe('ticketsMarkdown', () => {
     const { tickets } = ticketsMarkdown([file('c.md', 'id: C'), file('a.md', 'id: A\norder: 2'), file('b.md', 'id: B\norder: 1'), file('d.md', 'id: D')]);
     expect(tickets.map((t) => t.id)).toEqual(['B', 'A', 'C', 'D']);
   });
+});
+
+// S-BTN-43: the number passed to Dibber is an order from the source, not a queue position.
+it('inherits the parent order or uses the median of ranked open tickets for a filing', () => {
+  const files = [file('a.md', 'id: A\norder: 4.5'), file('b.mdx', 'id: B\norder: 10.5'),
+    file('closed.md', 'id: C\norder: 99\nstatus: done'), file('unranked.md', 'id: D')];
+  expect(filingOrder(files, 'A')).toBe(4.5);
+  expect(filingOrder(files)).toBe(7.5);
+  expect(filingOrder(files, 'D')).toBe(7.5);
+  expect(filingOrder([files[2], files[3]])).toBe(0);
 });

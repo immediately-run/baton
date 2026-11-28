@@ -21,7 +21,7 @@ import { locate, prsOf } from './tickets-file';
 import { PAGE_NAME, ticketsPage } from './tickets-page';
 import { readItems } from './read-items';
 import { filingDate, firstCommit, historyEntries, rulesConfig, staleIds, staleList, staleRules, unshallow } from './tickets-rules';
-import { ticketsMarkdown } from './tickets-markdown';
+import { filingOrder, ticketsMarkdown } from './tickets-markdown';
 import { claimMismatch, formatTicket, ticketPathsUnder, ticketPrView } from '../shared/ticketPr.mjs';
 import { defaultBranch } from './request';
 import { ownRepositoryId } from './remote-slug';
@@ -496,6 +496,9 @@ export function ticketsHelp(): string[] {
     '                   number or a scenario id from; --offline prints the next free by the scan;',
     '                   --coordinator prints Baton\'s number alone or refuses, never scanning: the',
     '                   command .dibber/config.json\'s coordinator names (B-326)',
+    'baton tickets order [REPO] [-i KEY] [--runner-state FILE]    show rank and ready position',
+    'baton tickets order --ready -i KEY --runner-state FILE      show this runner’s offers and sort keys',
+    'baton tickets filing-order [PARENT]    print an order for dibber new in this checkout',
     'baton tickets check [--repo DIR] [--quiet]    check the tickets without posting them',
     '  With -i KEY or BATON_KEY_FILE, report live files for board-done tickets; --offline skips this read.',
     '                   --pr BASE [--claimed-status-only] [--forge FILE]',
@@ -555,6 +558,12 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   }
   const [command, ...rest] = argv;
   if (RETIRED[command]) throw new Error(`baton tickets ${command} is retired — ticket files are Dibber's to write (B-326): ${RETIRED[command]}`);
+  if (command === 'filing-order') {
+    if (rest.length > 1 || rest[0]?.startsWith('-')) throw new Error('baton tickets filing-order [PARENT]');
+    const root = io.root ?? process.cwd();
+    log(String(filingOrder(readItems(root, readTicketSettings(root).items), rest[0])));
+    return 0;
+  }
   if (command === 'check') {
     const at = rest.indexOf('--claimable');
     if (at < 0) return ticketsCheckMain(rest, io);
@@ -562,7 +571,7 @@ export async function ticketsMain(argv: string[], io: TicketsIo = {}): Promise<n
   }
   // B-176 (R-BTN-199): the sequence numbers, for a PR author, an agent and Dibber's coordinator.
   if (command === 'next') return nextMain(rest, io);
-  throw new Error(`${command}: baton tickets next|check (baton tickets --help)`);
+  throw new Error(`${command}: baton tickets next|check|order|filing-order (baton tickets --help)`);
 }
 
 /** `check <id> --claimable`'s own flags: `-i KEY`, `--url`, `--offline`, `--repo`, `--branch`,

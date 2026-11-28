@@ -17,7 +17,7 @@ import { useRead } from '../../lib/reads';
 import { Text, textOf } from '../../lib/Text';
 import { Band, Empty, KeyValues, NotBuiltNote, PageHeader, RelTime, Section, UtcTime } from '../../lib/ui';
 import type { ScreenProps } from '../contract';
-import { KindMark, kindOf, Restarts, Severity, TicketLink } from './kit';
+import { KindMark, kindOf, Restarts, Severity, TicketLink, UnrankedDetail } from './kit';
 import type { ConditionShown } from './types';
 
 function Body({ c, repository }: { c: ConditionShown; repository: string }) {
@@ -60,6 +60,7 @@ function Body({ c, repository }: { c: ConditionShown; repository: string }) {
       ) : null}
       <Section title="The condition">
         <KeyValues rows={facts} />
+        <UnrankedDetail condition={c} repository={repository} />
       </Section>
       <Section title="Restarts" count={restarts}>
         {restarts === 0

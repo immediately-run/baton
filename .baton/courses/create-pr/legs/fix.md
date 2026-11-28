@@ -111,6 +111,14 @@ the findings and their disposition. Do not edit a shared findings log.
   repository's PR branch, of the same name, in its own checkout.
 - Reply on the threads you fixed, naming the commit.
 
+## Filing follow-ups
+
+If the work calls for filing a new ticket, in the ticket store checkout run
+`baton tickets filing-order <parent id>` for a child or `baton tickets filing-order` otherwise.
+Pass the number it prints as `--order N` to `$BATON_DIBBER new`; also pass `--parent` for a
+child. The command inherits the parent's order or uses the median of ranked open tickets
+(`0` if none are ranked).
+
 ## Do not
 
 - A leg never edits a file another ticket's leg may edit — no CHANGELOG, no index, no

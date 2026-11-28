@@ -388,7 +388,11 @@ never refuses, and acting against it is accepted and recorded `advice-overridden
 
 - **The default order** within a group: (1) expedite — `EXPEDITE` tag or override (R-BTN-12),
   within the lane's bound; (2) fewer legs to an end (`to_end`, R-BTN-69); (3) the sync's `rank`;
-  (4) the queued leg's `ready_since`, oldest first; (5) ticket id.
+  (4) the queued leg's `ready_since`, oldest first; (5) ticket id. `baton tickets order --ready`
+  prints the authenticated runner's `recommendations?all=1` in the served order, with each key and
+  the R-BTN-61 weight and group place. The Board and Tickets reads show the rank and, for ready
+  tickets, the offered position when a runner session is proved; without one they show the
+  repository queue position, not an eligibility claim.
 
 - **Recommendations.** `GET /v1/runner/recommendations[?limit=n]` returns the merged list
   without claiming; `GET /v1/runner/next` is its first entry. Each entry has the ticket, its
